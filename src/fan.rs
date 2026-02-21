@@ -228,19 +228,19 @@ impl FanCurve {
         self
     }
 
-    /// The standard fan curve
+    /// The standard fan curve, tuned for aggressive ramp with quiet idle.
+    /// Low-speed buffer at 40C avoids hard on/off cycling on bearings.
+    /// Hits 100% at 70C for plenty of thermal headroom.
     pub fn standard() -> Self {
         Self::default()
-            .append(44_99, 0_00)
+            .append(39_99, 0_00)
+            .append(40_00, 15_00)
             .append(45_00, 30_00)
-            .append(55_00, 35_00)
-            .append(65_00, 40_00)
-            .append(75_00, 50_00)
-            .append(78_00, 60_00)
-            .append(81_00, 70_00)
-            .append(84_00, 80_00)
-            .append(86_00, 90_00)
-            .append(88_00, 100_00)
+            .append(50_00, 40_00)
+            .append(55_00, 55_00)
+            .append(60_00, 70_00)
+            .append(65_00, 85_00)
+            .append(70_00, 100_00)
     }
 
     /// Fan curve for threadripper 2
@@ -352,16 +352,14 @@ mod tests {
         let standard = FanCurve::standard();
 
         assert_eq!(standard.get_duty(0), Some(0));
-        assert_eq!(standard.get_duty(4499), Some(0));
+        assert_eq!(standard.get_duty(3999), Some(0));
+        assert_eq!(standard.get_duty(4000), Some(1500));
         assert_eq!(standard.get_duty(4500), Some(3000));
-        assert_eq!(standard.get_duty(5500), Some(3500));
-        assert_eq!(standard.get_duty(6500), Some(4000));
-        assert_eq!(standard.get_duty(7500), Some(5000));
-        assert_eq!(standard.get_duty(7800), Some(6000));
-        assert_eq!(standard.get_duty(8100), Some(7000));
-        assert_eq!(standard.get_duty(8400), Some(8000));
-        assert_eq!(standard.get_duty(8600), Some(9000));
-        assert_eq!(standard.get_duty(8800), Some(10000));
+        assert_eq!(standard.get_duty(5000), Some(4000));
+        assert_eq!(standard.get_duty(5500), Some(5500));
+        assert_eq!(standard.get_duty(6000), Some(7000));
+        assert_eq!(standard.get_duty(6500), Some(8500));
+        assert_eq!(standard.get_duty(7000), Some(10000));
         assert_eq!(standard.get_duty(10000), Some(10000));
     }
 
