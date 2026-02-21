@@ -127,7 +127,7 @@ pub enum GraphicsDeviceError {
     SysFs(io::Error),
     #[error("failed to unbind {} on PCI driver {}: {}", func, driver, why)]
     Unbind { func: String, driver: String, why: io::Error },
-    #[error("update-initramfs failed with {} status", _0)]
+    #[error("mkinitcpio failed with {} status", _0)]
     UpdateInitramfs(ExitStatus),
     #[error("failed to access Xserver config: {}", _0)]
     XserverConf(io::Error),
@@ -675,7 +675,7 @@ fn update_initramfs_cmd() -> (&'static str, &'static str) {
     if path::Path::new("/usr/bin/dracut").exists() {
         ("dracut", "--force")
     } else {
-        ("update-initramfs", "-u")
+        ("mkinitcpio", "-P")
     }
 }
 

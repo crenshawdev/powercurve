@@ -61,11 +61,9 @@ async fn signal_handling() {
     CONTINUE.store(false, Ordering::SeqCst);
 }
 
-// Disabled by default because some systems have quirky ACPI tables that fail to resume from
-// suspension.
-static PCI_RUNTIME_PM: AtomicBool = AtomicBool::new(false);
-
-// TODO: Whitelist system76 hardware that's known to work with this setting.
+// Enabled by default. Set S76_POWER_PCI_RUNTIME_PM=0 to disable if your system
+// has ACPI resume issues.
+static PCI_RUNTIME_PM: AtomicBool = AtomicBool::new(true);
 pub(crate) fn pci_runtime_pm_support() -> bool { PCI_RUNTIME_PM.load(Ordering::SeqCst) }
 
 struct PowerDaemon {
@@ -512,7 +510,9 @@ impl NetHadessPowerProfiles {
 pub async fn daemon() -> anyhow::Result<()> {
     let signal_handling_fut = signal_handling();
 
-    let pci_runtime_pm = std::env::var("S76_POWER_PCI_RUNTIME_PM").ok().is_some_and(|v| v == "1");
+    let pci_runtime_pm = std::env::var("S76_POWER_PCI_RUNTIME_PM")
+        .map(|v| v != "0")
+        .unwrap_or(true);
 
     PCI_RUNTIME_PM.store(pci_runtime_pm, Ordering::SeqCst);
 
