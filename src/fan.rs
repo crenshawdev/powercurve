@@ -107,14 +107,17 @@ impl FanDaemon {
             });
 
         // Fetch NVIDIA temperatures from the `nvidia-smi` tool when it exists.
+        // nvidia-smi reports in whole Celsius, so convert to millidegrees to
+        // match the hwmon convention used everywhere else.
         if self.nvidia_exists && !self.displayed_warning.get() {
             let mut nv_temp = 0;
             match nvidia_temperatures(|temp| nv_temp = cmp::max(temp, nv_temp)) {
                 Ok(()) => {
                     if nv_temp != 0 {
-                        log::debug!("highest nvidia temp: {}", nv_temp);
+                        let nv_temp_m = nv_temp * 1000;
+                        log::debug!("highest nvidia temp: {}", nv_temp_m);
                         temp_opt =
-                            Some(temp_opt.map_or(nv_temp, |temp| cmp::max(nv_temp * 1000, temp)));
+                            Some(temp_opt.map_or(nv_temp_m, |temp| cmp::max(nv_temp_m, temp)));
                     }
                 }
                 Err(why) => {
