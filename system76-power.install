@@ -1,0 +1,12 @@
+post_install() {
+  systemctl daemon-reload
+}
+
+post_upgrade() {
+  systemctl daemon-reload
+  systemctl try-restart com.system76.PowerDaemon.service
+}
+
+post_remove() {
+  systemctl daemon-reload
+}
