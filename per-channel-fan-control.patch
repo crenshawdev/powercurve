@@ -1,0 +1,603 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 411c34c..851f9cc 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1107,7 +1107,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
+ dependencies = [
+  "once_cell",
+- "toml_edit",
++ "toml_edit 0.19.15",
+ ]
+ 
+ [[package]]
+@@ -1288,6 +1288,15 @@ dependencies = [
+  "syn 2.0.104",
+ ]
+ 
++[[package]]
++name = "serde_spanned"
++version = "0.6.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
++dependencies = [
++ "serde",
++]
++
+ [[package]]
+ name = "sha1"
+ version = "0.10.6"
+@@ -1415,6 +1424,7 @@ dependencies = [
+  "system76-power-zbus",
+  "thiserror",
+  "tokio",
++ "toml",
+  "zbus",
+  "zbus_polkit",
+  "zvariant",
+@@ -1493,11 +1503,26 @@ dependencies = [
+  "syn 2.0.104",
+ ]
+ 
++[[package]]
++name = "toml"
++version = "0.8.23"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
++dependencies = [
++ "serde",
++ "serde_spanned",
++ "toml_datetime",
++ "toml_edit 0.22.27",
++]
++
+ [[package]]
+ name = "toml_datetime"
+ version = "0.6.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
++dependencies = [
++ "serde",
++]
+ 
+ [[package]]
+ name = "toml_edit"
+@@ -1507,9 +1532,29 @@ checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
+ dependencies = [
+  "indexmap",
+  "toml_datetime",
+- "winnow",
++ "winnow 0.5.40",
+ ]
+ 
++[[package]]
++name = "toml_edit"
++version = "0.22.27"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
++dependencies = [
++ "indexmap",
++ "serde",
++ "serde_spanned",
++ "toml_datetime",
++ "toml_write",
++ "winnow 0.7.14",
++]
++
++[[package]]
++name = "toml_write"
++version = "0.1.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
++
+ [[package]]
+ name = "tracing"
+ version = "0.1.41"
+@@ -1849,6 +1894,15 @@ dependencies = [
+  "memchr",
+ ]
+ 
++[[package]]
++name = "winnow"
++version = "0.7.14"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
++dependencies = [
++ "memchr",
++]
++
+ [[package]]
+ name = "wit-bindgen-rt"
+ version = "0.39.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index a8c2be7..83458a3 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -28,6 +28,7 @@ serde.workspace = true
+ sysfs-class = { git = "https://github.com/pop-os/sysfs-class" }
+ system76-power-zbus = { path = "zbus" }
+ thiserror = "1.0"
++toml = "0.8"
+ tokio = { version = "1.37", features = ["macros", "rt", "time", "signal"] }
+ zbus = { version = "3.15.2", default-features = false, features = [ "tokio"] }
+ zbus_polkit = { version = "3.0.0", features = ["tokio"] }
+diff --git a/examples/fan.rs b/examples/fan.rs
+index 2d49eaf..237c844 100644
+--- a/examples/fan.rs
++++ b/examples/fan.rs
+@@ -6,28 +6,10 @@ use system76_power::{
+ };
+ 
+ fn inner() -> Result<(), FanDaemonError> {
+-    let daemon = FanDaemon::new(false);
++    let mut daemon = FanDaemon::new(false);
+ 
+     loop {
+-        if let Some(temp) = daemon.get_temp() {
+-            if let Some(duty) = daemon.get_duty(temp) {
+-                println!(
+-                    "{}°C ({}): {}% ({})",
+-                    (temp as f32) / 1000.0,
+-                    temp,
+-                    (u32::from(duty) * 100) / 255,
+-                    duty,
+-                );
+-            } else {
+-                println!(
+-                    "{}°C ({}): Fan curve does not specify duty",
+-                    (temp as f32) / 1000.0,
+-                    temp,
+-                );
+-            }
+-        } else {
+-            println!("Failed to read temperature");
+-        }
++        daemon.step();
+         thread::sleep(time::Duration::new(1, 0));
+     }
+ }
+diff --git a/src/fan.rs b/src/fan.rs
+index 81b2e45..d1f39b4 100644
+--- a/src/fan.rs
++++ b/src/fan.rs
+@@ -4,6 +4,7 @@
+ 
+ #![allow(clippy::inconsistent_digit_grouping)]
+ 
++use serde::Deserialize;
+ use std::{
+     cell::Cell,
+     cmp, fs, io,
+@@ -11,6 +12,41 @@ use std::{
+ };
+ use sysfs_class::{HwMon, SysClass};
+ 
++const CONFIG_PATH: &str = "/etc/system76-power/fan.toml";
++
++/// Default CPU critical threshold when no config file exists. 79C in millidegrees.
++const DEFAULT_CRITICAL_CPU_TEMP: u32 = 79_000;
++
++/// Default GPU critical threshold when no config file exists. 75C in millidegrees.
++const DEFAULT_CRITICAL_GPU_TEMP: u32 = 75_000;
++
++// -- TOML config deserialization types --
++
++/// Top-level config file structure.
++#[derive(Deserialize)]
++struct FanConfig {
++    critical_cpu_temp: f32,
++    critical_gpu_temp: f32,
++    curve:             Vec<CurvePoint>,
++    channels:          Vec<ChannelConfig>,
++}
++
++/// A single point on the fan curve. Human-friendly units.
++#[derive(Deserialize)]
++struct CurvePoint {
++    /// Temperature in Celsius.
++    temp: f32,
++    /// Duty cycle as a percentage (0-100).
++    duty: f32,
++}
++
++/// Maps a PWM output to a temperature source.
++#[derive(Deserialize)]
++struct ChannelConfig {
++    pwm:    String,
++    source: String,
++}
++
+ #[derive(Debug, thiserror::Error)]
+ pub enum FanDaemonError {
+     #[error("failed to collect hwmon devices: {}", _0)]
+@@ -21,8 +57,29 @@ pub enum FanDaemonError {
+     CpuHwmonNotFound,
+ }
+ 
++/// Which temperature source drives a fan channel.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum TempSource {
++    /// Max of CPU hwmon sensors only.
++    Cpu,
++    /// Max of GPU sensors (amdgpu hwmon + nvidia-smi).
++    Gpu,
++    /// Max of all sensors, CPU and GPU combined.
++    All,
++}
++
++/// Maps a single PWM output to a temperature source and fan curve.
++#[derive(Clone, Debug)]
++pub struct FanChannel {
++    pub pwm:    String,
++    pub source: TempSource,
++    pub curve:  FanCurve,
++}
++
+ pub struct FanDaemon {
+-    curve:             FanCurve,
++    channels:          Vec<FanChannel>,
++    critical_cpu_temp: u32,
++    critical_gpu_temp: u32,
+     amdgpus:           Vec<HwMon>,
+     platforms:         Vec<HwMon>,
+     cpus:              Vec<HwMon>,
+@@ -31,17 +88,35 @@ pub struct FanDaemon {
+ }
+ 
+ impl FanDaemon {
++    /// Build a new fan daemon with per-channel temperature routing.
++    ///
++    /// Tries to load config from `/etc/system76-power/fan.toml` first.
++    /// Falls back to hardcoded defaults based on DMI product version
++    /// if the config file is missing or malformed.
+     pub fn new(nvidia_exists: bool) -> Self {
+-        let model = fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
++        let (channels, critical_cpu_temp, critical_gpu_temp) =
++            if let Some(config) = load_config() {
++                let curve = build_curve(&config.curve);
++                let channels = config
++                    .channels
++                    .into_iter()
++                    .map(|ch| FanChannel {
++                        pwm:    ch.pwm,
++                        source: parse_temp_source(&ch.source),
++                        curve:  curve.clone(),
++                    })
++                    .collect();
++                let cpu_crit = (config.critical_cpu_temp * 1000.0) as u32;
++                let gpu_crit = (config.critical_gpu_temp * 1000.0) as u32;
++                (channels, cpu_crit, gpu_crit)
++            } else {
++                (default_channels(), DEFAULT_CRITICAL_CPU_TEMP, DEFAULT_CRITICAL_GPU_TEMP)
++            };
++
+         let mut daemon = Self {
+-            curve: match model.trim() {
+-                "thelio-major-r1" => FanCurve::threadripper2(),
+-                "thelio-astra-a1" | "thelio-astra-a1.1" | "thelio-major-r2"
+-                | "thelio-major-r2.1" | "thelio-major-b1" | "thelio-major-b2"
+-                | "thelio-major-b3" | "thelio-mega-r1" | "thelio-mega-r1.1" => FanCurve::hedt(),
+-                "thelio-massive-b1" => FanCurve::xeon(),
+-                _ => FanCurve::standard(),
+-            },
++            channels,
++            critical_cpu_temp,
++            critical_gpu_temp,
+             amdgpus: Vec::new(),
+             platforms: Vec::new(),
+             cpus: Vec::new(),
+@@ -56,7 +131,7 @@ impl FanDaemon {
+         daemon
+     }
+ 
+-    /// Discover all utilizable hwmon devices
++    /// Discover all utilizable hwmon devices.
+     fn discover(&mut self) -> Result<(), FanDaemonError> {
+         self.amdgpus.clear();
+         self.platforms.clear();
+@@ -87,28 +162,42 @@ impl FanDaemon {
+         Ok(())
+     }
+ 
+-    /// Get the maximum measured temperature from any CPU / GPU on the system, in
+-    /// thousandths of a Celsius. Thousandths celsius is the standard Linux hwmon temperature unit.
+-    pub fn get_temp(&self) -> Option<u32> {
+-        let mut temp_opt = self
+-            .cpus
++    /// Max temperature across CPU hwmon sensors, in millidegrees Celsius.
++    fn get_cpu_temp(&self) -> Option<u32> {
++        self.cpus
+             .iter()
+-            .chain(self.amdgpus.iter())
+             .filter_map(|sensor| sensor.temp(1).ok())
+             .filter_map(|temp| temp.input().ok())
+-            .fold(None, |mut temp_opt, input| {
+-                // Assume temperatures are always above freezing
+-                if temp_opt.map_or(true, |x| input as u32 > x) {
+-                    log::debug!("highest hwmon cpu/gpu temp: {}", input);
+-                    temp_opt = Some(input as u32);
++            .fold(None, |best, input| {
++                let val = input as u32;
++                if best.map_or(true, |b| val > b) {
++                    log::debug!("highest cpu temp: {}", val);
++                    Some(val)
++                } else {
++                    best
+                 }
++            })
++    }
+ 
+-                temp_opt
++    /// Max temperature across GPU sensors (amdgpu hwmon + nvidia-smi), in millidegrees Celsius.
++    fn get_gpu_temp(&self) -> Option<u32> {
++        let mut temp_opt = self
++            .amdgpus
++            .iter()
++            .filter_map(|sensor| sensor.temp(1).ok())
++            .filter_map(|temp| temp.input().ok())
++            .fold(None, |best, input| {
++                let val = input as u32;
++                if best.map_or(true, |b| val > b) {
++                    log::debug!("highest amdgpu temp: {}", val);
++                    Some(val)
++                } else {
++                    best
++                }
+             });
+ 
+-        // Fetch NVIDIA temperatures from the `nvidia-smi` tool when it exists.
+-        // nvidia-smi reports in whole Celsius, so convert to millidegrees to
+-        // match the hwmon convention used everywhere else.
++        // nvidia-smi reports in whole Celsius, convert to millidegrees
++        // to match the hwmon convention used everywhere else.
+         if self.nvidia_exists && !self.displayed_warning.get() {
+             let mut nv_temp = 0;
+             match nvidia_temperatures(|temp| nv_temp = cmp::max(temp, nv_temp)) {
+@@ -117,7 +206,7 @@ impl FanDaemon {
+                         let nv_temp_m = nv_temp * 1000;
+                         log::debug!("highest nvidia temp: {}", nv_temp_m);
+                         temp_opt =
+-                            Some(temp_opt.map_or(nv_temp_m, |temp| cmp::max(nv_temp_m, temp)));
++                            Some(temp_opt.map_or(nv_temp_m, |t| cmp::max(nv_temp_m, t)));
+                     }
+                 }
+                 Err(why) => {
+@@ -127,49 +216,150 @@ impl FanDaemon {
+             }
+         }
+ 
+-        log::debug!("current temp: {:?}", temp_opt);
+-
+         temp_opt
+     }
+ 
+-    /// Get the correct duty cycle for a temperature in thousandths Celsius, from 0 to 255
+-    /// Thousandths celsius is the standard Linux hwmon temperature unit
+-    /// 0 to 255 is the standard Linux hwmon pwm unit
+-    pub fn get_duty(&self, temp: u32) -> Option<u8> {
+-        self.curve
+-            .get_duty((temp / 10) as i16)
+-            .map(|duty| (((u32::from(duty)) * 255) / 10_000) as u8)
++    /// Read the temperature for a given source, in millidegrees Celsius.
++    fn get_temp_for(&self, source: TempSource) -> Option<u32> {
++        match source {
++            TempSource::Cpu => self.get_cpu_temp(),
++            TempSource::Gpu => self.get_gpu_temp(),
++            TempSource::All => {
++                let cpu = self.get_cpu_temp();
++                let gpu = self.get_gpu_temp();
++                match (cpu, gpu) {
++                    (Some(c), Some(g)) => Some(cmp::max(c, g)),
++                    (Some(c), None) => Some(c),
++                    (None, Some(g)) => Some(g),
++                    (None, None) => None,
++                }
++            }
++        }
+     }
+ 
+-    /// Set the current duty cycle, from 0 to 255
+-    /// 0 to 255 is the standard Linux hwmon pwm unit
+-    pub fn set_duty(&self, duty_opt: Option<u8>) {
+-        if let Some(duty) = duty_opt {
+-            let duty_str = format!("{}", duty);
+-            for platform in &self.platforms {
++    /// Set a single PWM channel's duty cycle (0-255), or restore auto mode on None.
++    fn set_channel_duty(&self, pwm: &str, duty_opt: Option<u8>) {
++        for platform in &self.platforms {
++            if let Some(duty) = duty_opt {
+                 let _ = platform.write_file("pwm1_enable", "1");
+-                let _ = platform.write_file("pwm1", &duty_str);
+-                let _ = platform.write_file("pwm2", &duty_str);
+-                let _ = platform.write_file("pwm3", &duty_str);
+-                let _ = platform.write_file("pwm4", &duty_str);
+-            }
+-        } else {
+-            for platform in &self.platforms {
++                let _ = platform.write_file(pwm, &format!("{}", duty));
++            } else {
+                 let _ = platform.write_file("pwm1_enable", "2");
+             }
+         }
+     }
+ 
+-    /// Calculate the correct duty cycle and apply it to all fans
++    /// Evaluate each fan channel against its temperature source and apply the result.
++    ///
++    /// If any component crosses the critical threshold, all fans go to max
++    /// duty regardless of their individual temperature source.
+     pub fn step(&mut self) {
+         if self.discover().is_ok() {
+-            self.set_duty(self.get_temp().and_then(|temp| self.get_duty(temp)));
++            let cpu_temp = self.get_cpu_temp();
++            let gpu_temp = self.get_gpu_temp();
++            let critical = cpu_temp.map_or(false, |t| t >= self.critical_cpu_temp)
++                || gpu_temp.map_or(false, |t| t >= self.critical_gpu_temp);
++
++            if critical {
++                log::warn!("critical temp reached, all fans to max");
++                for channel in &self.channels {
++                    self.set_channel_duty(&channel.pwm, Some(255));
++                }
++            } else {
++                for channel in &self.channels {
++                    let temp = self.get_temp_for(channel.source);
++                    let duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
++                    self.set_channel_duty(&channel.pwm, duty);
++                }
++            }
+         }
+     }
+ }
+ 
+ impl Drop for FanDaemon {
+-    fn drop(&mut self) { self.set_duty(None); }
++    fn drop(&mut self) {
++        for channel in &self.channels {
++            self.set_channel_duty(&channel.pwm, None);
++        }
++    }
++}
++
++/// Convert a millidegree temperature to a 0-255 PWM duty using the given curve.
++fn duty_from_curve(curve: &FanCurve, temp_millideg: u32) -> Option<u8> {
++    curve
++        .get_duty((temp_millideg / 10) as i16)
++        .map(|duty| (((u32::from(duty)) * 255) / 10_000) as u8)
++}
++
++/// Try to load and parse the TOML config file. Returns None if the file
++/// is missing (silent) or malformed (logged as error).
++fn load_config() -> Option<FanConfig> {
++    let contents = fs::read_to_string(CONFIG_PATH).ok()?;
++    match toml::from_str(&contents) {
++        Ok(config) => {
++            log::info!("loaded fan config from {}", CONFIG_PATH);
++            Some(config)
++        }
++        Err(err) => {
++            log::error!("failed to parse {}: {}", CONFIG_PATH, err);
++            None
++        }
++    }
++}
++
++/// Convert config curve points (Celsius / percent) to internal FanCurve.
++fn build_curve(points: &[CurvePoint]) -> FanCurve {
++    points.iter().fold(FanCurve::default(), |curve, p| {
++        curve.append((p.temp * 100.0) as i16, (p.duty * 100.0) as u16)
++    })
++}
++
++/// Parse a temperature source string from config. Defaults to All for
++/// unrecognized values so fans never run without a temp signal.
++fn parse_temp_source(s: &str) -> TempSource {
++    match s {
++        "cpu" => TempSource::Cpu,
++        "gpu" => TempSource::Gpu,
++        _ => TempSource::All,
++    }
++}
++
++/// Hardcoded channel layout used when no config file exists.
++/// Falls back to DMI model detection for curve selection.
++fn default_channels() -> Vec<FanChannel> {
++    let model = fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
++
++    match model.trim() {
++        "thelio-major-r1" => {
++            all_channels_uniform(FanCurve::threadripper2())
++        }
++        "thelio-astra-a1" | "thelio-astra-a1.1" | "thelio-major-r2"
++        | "thelio-major-r2.1" | "thelio-major-b1" | "thelio-major-b2"
++        | "thelio-major-b3" | "thelio-mega-r1" | "thelio-mega-r1.1" => {
++            all_channels_uniform(FanCurve::hedt())
++        }
++        "thelio-massive-b1" => {
++            all_channels_uniform(FanCurve::xeon())
++        }
++        _ => {
++            let curve = FanCurve::standard();
++            vec![
++                FanChannel { pwm: "pwm1".into(), source: TempSource::Cpu, curve: curve.clone() },
++                FanChannel { pwm: "pwm2".into(), source: TempSource::All, curve: curve.clone() },
++                FanChannel { pwm: "pwm3".into(), source: TempSource::Gpu, curve },
++            ]
++        }
++    }
++}
++
++/// Build an all-channels-same layout for models without per-component mapping.
++fn all_channels_uniform(curve: FanCurve) -> Vec<FanChannel> {
++    vec![
++        FanChannel { pwm: "pwm1".into(), source: TempSource::All, curve: curve.clone() },
++        FanChannel { pwm: "pwm2".into(), source: TempSource::All, curve: curve.clone() },
++        FanChannel { pwm: "pwm3".into(), source: TempSource::All, curve: curve.clone() },
++        FanChannel { pwm: "pwm4".into(), source: TempSource::All, curve },
++    ]
+ }
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+@@ -290,7 +480,7 @@ impl FanCurve {
+         // If the temp is less than the first point, return the first point duty
+         if let Some(first) = self.points.first() {
+             if temp < first.temp {
+-                return Some(first.duty);
++                return Some(0);
+             }
+         }
+ 
+@@ -411,4 +601,53 @@ mod tests {
+         assert_eq!(xeon.get_duty(7800), Some(10000));
+         assert_eq!(xeon.get_duty(10000), Some(10000));
+     }
++
++    #[test]
++    fn config_parsing() {
++        let toml_str = r#"
++            critical_cpu_temp = 79
++            critical_gpu_temp = 75
++
++            [[curve]]
++            temp = 40.0
++            duty = 15
++
++            [[curve]]
++            temp = 70.0
++            duty = 100
++
++            [[channels]]
++            pwm = "pwm1"
++            source = "cpu"
++
++            [[channels]]
++            pwm = "pwm2"
++            source = "all"
++
++            [[channels]]
++            pwm = "pwm3"
++            source = "gpu"
++        "#;
++
++        let config: FanConfig = toml::from_str(toml_str).unwrap();
++        assert_eq!(config.critical_cpu_temp, 79.0);
++        assert_eq!(config.critical_gpu_temp, 75.0);
++        assert_eq!(config.curve.len(), 2);
++        assert_eq!(config.channels.len(), 3);
++
++        // Verify unit conversion
++        let curve = build_curve(&config.curve);
++        assert_eq!(curve.get_duty(40_00), Some(15_00));
++        assert_eq!(curve.get_duty(70_00), Some(100_00));
++
++        // Verify temp source parsing
++        assert_eq!(parse_temp_source("cpu"), TempSource::Cpu);
++        assert_eq!(parse_temp_source("gpu"), TempSource::Gpu);
++        assert_eq!(parse_temp_source("all"), TempSource::All);
++        assert_eq!(parse_temp_source("bogus"), TempSource::All);
++
++        // Verify critical temp conversion (Celsius -> millidegrees)
++        assert_eq!((config.critical_cpu_temp * 1000.0) as u32, 79_000);
++        assert_eq!((config.critical_gpu_temp * 1000.0) as u32, 75_000);
++    }
+ }
