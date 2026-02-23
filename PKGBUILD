@@ -1,9 +1,7 @@
-# Maintainer: Mark Wagie <mark dot wagie at proton dot me>
-# Contributor: tleydxdy <shironeko(at)waifu(dot)club>
-pkgname=system76-power
-pkgver=1.2.9
+pkgname=system76-power-custom-git
+pkgver=1.2.9.r463.c7c1920
 pkgrel=1
-pkgdesc="System76 Power Management"
+pkgdesc="System76 Power Management (custom fan control)"
 arch=('x86_64' 'aarch64')
 url="https://codeberg.org/VintageTechie/system76-power-custom"
 license=('GPL-3.0-or-later')
@@ -17,10 +15,18 @@ optdepends=(
   'system76-acpi-dkms: only needed for systems using open firmware with kernels <5.16'
   'system76-dkms: needed for systems using proprietary firmware'
 )
-provides=('power-profiles-daemon')
-install="$pkgname.install"
+provides=('system76-power' 'power-profiles-daemon')
+conflicts=('system76-power')
+install="system76-power.install"
 source=("git+ssh://git@codeberg.org/VintageTechie/system76-power-custom.git")
 sha256sums=('SKIP')
+
+pkgver() {
+  cd "system76-power-custom"
+  local _ver
+  _ver=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+  printf "%s.r%s.%s" "$_ver" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
 
 prepare() {
   cd "system76-power-custom"
