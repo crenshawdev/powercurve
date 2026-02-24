@@ -7,6 +7,7 @@ url="https://codeberg.org/VintageTechie/vintagetechie-power"
 license=('GPL-3.0-or-later')
 depends=(
   'dbus'
+  'hidapi'
   'libusb'
   'polkit'
 )
