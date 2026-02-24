@@ -87,7 +87,7 @@ impl PowerDaemon {
             return Ok(());
         }
 
-        let _res = System76Power::power_profile_switch(context, name).await;
+        let _res = PowerService::power_profile_switch(context, name).await;
 
         func(&mut self.profile_errors);
 
@@ -107,15 +107,15 @@ impl PowerDaemon {
 }
 
 #[derive(Clone)]
-struct System76Power(Arc<Mutex<PowerDaemon>>);
+struct PowerService(Arc<Mutex<PowerDaemon>>);
 
-impl System76Power {
+impl PowerService {
     pub async fn emit_active_profile_changed(&self) {
         let (upp_connection, hadess_connection, profile) = {
             let this = self.0.lock().await;
             let Some((_, upp, hadess)) = this.connections.clone() else { return };
 
-            let profile = system76_profile_to_upp_str(&this.power_profile);
+            let profile = profile_to_upp_str(&this.power_profile);
             (upp, hadess, profile)
         };
 
@@ -147,8 +147,8 @@ impl System76Power {
     }
 }
 
-#[zbus::dbus_interface(name = "com.system76.PowerDaemon")]
-impl System76Power {
+#[zbus::dbus_interface(name = "com.vintagetechie.PowerDaemon")]
+impl PowerService {
     async fn quiet(
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
@@ -292,7 +292,7 @@ impl UPowerPowerProfiles {
 
     #[dbus_interface(property)]
     async fn active_profile(&self) -> &str {
-        system76_profile_to_upp_str(self.0.lock().await.power_profile.as_str())
+        profile_to_upp_str(self.0.lock().await.power_profile.as_str())
     }
 
     #[dbus_interface(property)]
@@ -392,7 +392,7 @@ pub async fn daemon() -> anyhow::Result<()> {
     NmiWatchdog.set(b"0");
 
     let daemon = Arc::new(Mutex::new(PowerDaemon::new()));
-    let mut system76_daemon = System76Power(daemon.clone());
+    let mut power_service = PowerService(daemon.clone());
 
     // powerprofilesctl
     let upp_connection = zbus::ConnectionBuilder::system()
@@ -423,19 +423,19 @@ pub async fn daemon() -> anyhow::Result<()> {
         .context("failed to create zbus connection builder")?
         .name(DBUS_NAME)
         .context("unable to register name")?
-        .serve_at(DBUS_PATH, system76_daemon.clone())
+        .serve_at(DBUS_PATH, power_service.clone())
         .context("unable to serve")?
         .build()
         .await
-        .context("unable to create system service for com.system76.PowerDaemon")?;
+        .context("unable to create system service for com.vintagetechie.PowerDaemon")?;
 
-    system76_daemon.0.lock().await.connections =
+    power_service.0.lock().await.connections =
         Some((connection.clone(), upp_connection, hadess_connection));
 
     let context = zbus::SignalContext::new(&connection, DBUS_PATH)
         .context("unable to create signal context")?;
 
-    if let Err(why) = system76_daemon.balanced(context.clone()).await {
+    if let Err(why) = power_service.balanced(context.clone()).await {
         log::warn!("Failed to set initial profile: {}", why);
     }
 
@@ -455,7 +455,7 @@ pub async fn daemon() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn system76_profile_to_upp_str(system76_profile: &str) -> &'static str {
+fn profile_to_upp_str(system76_profile: &str) -> &'static str {
     match system76_profile {
         "Quiet" => "power-saver",
         "Balanced" => "balanced",

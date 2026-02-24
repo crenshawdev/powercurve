@@ -1,7 +1,7 @@
 <!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
-<node name="/com/system76/PowerDaemon">
-  <interface name="com.system76.PowerDaemon">
+<node name="/com/vintagetechie/PowerDaemon">
+  <interface name="com.vintagetechie.PowerDaemon">
     <method name="GetProfile">
       <arg name="profile" type="s" direction="out"/>
     </method>

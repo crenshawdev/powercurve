@@ -1,6 +1,6 @@
 use log::LevelFilter;
 use std::{process, thread, time};
-use system76_power::{
+use vintagetechie_power::{
     fan::{FanDaemon, FanDaemonError},
     logging,
 };

@@ -1,5 +1,5 @@
 [package]
-name = "system76-power-zbus"
+name = "vintagetechie-power-zbus"
 version = "1.2.1"
 edition = "2021"
 

@@ -12,7 +12,7 @@ use std::{
 };
 use sysfs_class::{HwMon, SysClass};
 
-const CONFIG_PATH: &str = "/etc/system76-power/fan.toml";
+const CONFIG_PATH: &str = "/etc/vintagetechie-power/fan.toml";
 
 /// Default CPU critical threshold when no config file exists. 79C in millidegrees.
 const DEFAULT_CRITICAL_CPU_TEMP: u32 = 79_000;
@@ -90,7 +90,7 @@ pub struct FanDaemon {
 impl FanDaemon {
     /// Build a new fan daemon with per-channel temperature routing.
     ///
-    /// Tries to load config from `/etc/system76-power/fan.toml` first.
+    /// Tries to load config from `/etc/vintagetechie-power/fan.toml` first.
     /// Falls back to hardcoded defaults based on DMI product version
     /// if the config file is missing or malformed.
     pub fn new(nvidia_exists: bool) -> Self {

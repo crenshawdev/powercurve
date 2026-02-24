@@ -11,8 +11,8 @@ depends=(
 makedepends=('cargo' 'git')
 provides=('system76-power' 'power-profiles-daemon')
 conflicts=('system76-power' 'power-profiles-daemon')
-backup=('etc/system76-power/fan.toml')
-install="system76-power.install"
+backup=('etc/vintagetechie-power/fan.toml')
+install="vintagetechie-power.install"
 source=("git+https://codeberg.org/VintageTechie/vintagetechie-power.git")
 sha256sums=('SKIP')
 

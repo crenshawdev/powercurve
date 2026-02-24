@@ -7,7 +7,7 @@
 use clap::Parser;
 use log::LevelFilter;
 use std::process;
-use system76_power::{args::Args, client, daemon, logging};
+use vintagetechie_power::{args::Args, client, daemon, logging};
 
 fn main() {
     let args = Args::parse();

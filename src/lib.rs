@@ -19,9 +19,9 @@ pub mod radeon;
 pub mod snd;
 pub mod util;
 
-pub static DBUS_NAME: &str = "com.system76.PowerDaemon";
-pub static DBUS_PATH: &str = "/com/system76/PowerDaemon";
-pub static DBUS_IFACE: &str = "com.system76.PowerDaemon";
+pub static DBUS_NAME: &str = "com.vintagetechie.PowerDaemon";
+pub static DBUS_PATH: &str = "/com/vintagetechie/PowerDaemon";
+pub static DBUS_IFACE: &str = "com.vintagetechie.PowerDaemon";
 
 #[derive(Copy, Clone, Debug)]
 pub enum Profile {
