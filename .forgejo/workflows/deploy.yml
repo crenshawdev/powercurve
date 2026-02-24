@@ -1,0 +1,48 @@
+name: Build and deploy to pacman repo
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: setup build environment
+        run: |
+          pacman -Syu --noconfirm cargo git dbus
+          useradd -m builder
+
+      - uses: actions/checkout@v4
+
+      - name: build package
+        run: |
+          chown -R builder:builder .
+          su builder -c 'makepkg -s --noconfirm'
+
+      - name: deploy to arch repo
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          pkg=$(ls vintagetechie-power-git-*-x86_64.pkg.tar.zst | head -1)
+
+          git clone --branch pages \
+            "https://VintageTechie:${DEPLOY_TOKEN}@codeberg.org/VintageTechie/vintagetechie-arch-repo.git" \
+            /tmp/repo
+
+          rm -f /tmp/repo/x86_64/vintagetechie-power-git-*.pkg.tar.zst
+          cp "$pkg" /tmp/repo/x86_64/
+
+          cd /tmp/repo/x86_64
+          repo-add vintagetechie-arch-repo.db.tar.gz "$pkg"
+
+          cd /tmp/repo
+          git config user.name "VintageTechie"
+          git config user.email "noreply@codeberg.org"
+          git add -A
+          git commit -m "update vintagetechie-power-git to ${tag}"
+          git push origin pages
