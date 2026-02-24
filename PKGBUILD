@@ -1,5 +1,5 @@
 pkgname=vintagetechie-power-git
-pkgver=1.2.9.r465.ae9b4e3
+pkgver=1.2.9.r468.7c7aaeb
 pkgrel=1
 pkgdesc="Desktop power management with per-channel fan control for Thelio systems"
 arch=('x86_64' 'aarch64')
@@ -40,12 +40,14 @@ build() {
   cd "vintagetechie-power"
   CFLAGS+=" -ffat-lto-objects"
   export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
   export HIDAPI_LINK_FLAGS="-lhidapi-hidraw"
   make
 }
 
 package() {
   cd "vintagetechie-power"
+  export CARGO_TARGET_DIR=target
   export HIDAPI_LINK_FLAGS="-lhidapi-hidraw"
   make DESTDIR="${pkgdir}" install
 }
