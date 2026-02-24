@@ -4,21 +4,19 @@
 
 use super::pci_runtime_pm_support;
 use crate::{
-    errors::{BacklightError, ModelError, PciDeviceError, ProfileError, ScsiHostError},
-    kernel_parameters::{DeviceList, Dirty, KernelParameter, LaptopMode},
+    errors::{ModelError, PciDeviceError, ProfileError, ScsiHostError},
+    kernel_parameters::{DeviceList, Dirty},
     radeon::RadeonDevice,
     Profile,
 };
 use intel_pstate::{PState, PStateError, PStateValues};
 use std::{
     fs,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
     process::Command,
 };
-use sysfs_class::{
-    Backlight, Brightness, Leds, PciDevice, RuntimePM, RuntimePowerManagement, ScsiHost, SysClass,
-};
+use sysfs_class::{PciDevice, RuntimePM, RuntimePowerManagement, ScsiHost, SysClass};
 
 /// Instead of returning on the first error, we want to collect all errors that occur while
 /// setting a profile. Even if one parameter fails to set, we'll still be able to set other
@@ -33,48 +31,25 @@ macro_rules! catch {
 }
 
 /// Sets parameters for the balanced profile.
-pub fn balanced(errors: &mut Vec<ProfileError>, set_brightness: bool) {
-    // Use the ACPI Platform Profile if the hardware is supported by the kernel.
+pub fn balanced(errors: &mut Vec<ProfileError>) {
     if crate::acpi_platform::supported() {
         crate::acpi_platform::balanced();
     }
 
-    // The dirty kernel parameter controls how often the OS will sync data to disks. The less
-    // frequently this occurs, the more power can be saved, yet the higher the risk of sudden
-    // power loss causing loss of data. 15s is a reasonable number.
+    // How often the OS syncs data to disk. 15s balances power saving against
+    // data loss risk from sudden power loss.
     Dirty::default().set_max_lost_work(15);
 
-    // Enables the laptop mode feature in the kernel, which allows mechanical drives to spin down
-    // when inactive.
-    LaptopMode.set(b"2");
-
-    // Sets radeon power profiles for AMD graphics.
     RadeonDevice::get_devices().for_each(|dev| dev.set_profiles("auto", "performance", "auto"));
 
-    // Enables SCSI / SATA link time power management.
     catch!(errors, scsi_host_link_time_pm_policy(&["med_power_with_dipm", "medium_power"]));
 
-    if set_brightness {
-        // Manage screen backlights.
-        catch!(errors, iterate_backlights(Backlight::iter(), &Brightness::set_if_lower_than, 40));
-
-        // Manage keyboard backlights.
-        catch!(
-            errors,
-            iterate_backlights(Leds::iter_keyboards(), &Brightness::set_if_lower_than, 50)
-        );
-    }
-
-    // Parameters which may cause on certain systems.
     if pci_runtime_pm_support() {
-        // Enables PCI device runtime power management.
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::On));
     }
 
-    // Set to balanced profile.
     crate::cpufreq::set(Profile::Balanced, 100);
 
-    // Control Intel PState values, if they exist.
     catch!(
         errors,
         pstate_values(
@@ -91,15 +66,13 @@ pub fn balanced(errors: &mut Vec<ProfileError>, set_brightness: bool) {
     }
 }
 
-/// Sets parameters for the performance profile
-pub fn performance(errors: &mut Vec<ProfileError>, _set_brightness: bool) {
-    // Use the ACPI Platform Profile if the hardware is supported by the kernel.
+/// Sets parameters for the performance profile.
+pub fn performance(errors: &mut Vec<ProfileError>) {
     if crate::acpi_platform::supported() {
         crate::acpi_platform::performance();
     }
 
     Dirty::default().set_max_lost_work(15);
-    LaptopMode.set(b"0");
     RadeonDevice::get_devices().for_each(|dev| dev.set_profiles("high", "performance", "auto"));
     catch!(errors, scsi_host_link_time_pm_policy(&["med_power_with_dipm", "max_performance"]));
     crate::cpufreq::set(Profile::Performance, 100);
@@ -123,35 +96,29 @@ pub fn performance(errors: &mut Vec<ProfileError>, _set_brightness: bool) {
     }
 }
 
-/// Sets parameters for the battery profile
-pub fn battery(errors: &mut Vec<ProfileError>, set_brightness: bool) {
-    // Use the ACPI Platform Profile if the hardware is supported by the kernel.
+/// Sets parameters for the quiet profile. Reduces CPU clocks and enables
+/// aggressive power management for a quieter, cooler desktop.
+pub fn quiet(errors: &mut Vec<ProfileError>) {
     if crate::acpi_platform::supported() {
         crate::acpi_platform::battery();
     }
 
     Dirty::default().set_max_lost_work(15);
-    LaptopMode.set(b"2");
     RadeonDevice::get_devices().for_each(|dev| dev.set_profiles("low", "battery", "low"));
     catch!(errors, scsi_host_link_time_pm_policy(&["min_power", "min_power"]));
-    crate::cpufreq::set(Profile::Battery, 50);
+    crate::cpufreq::set(Profile::Quiet, 50);
 
     catch!(
         errors,
         pstate_values(PStateValues::default().min_perf_pct(0).max_perf_pct(50).no_turbo(true))
     );
 
-    if set_brightness {
-        catch!(errors, iterate_backlights(Backlight::iter(), &Brightness::set_if_lower_than, 10));
-        catch!(errors, iterate_backlights(Leds::iter_keyboards(), &Brightness::set_brightness, 0));
-    }
-
     if pci_runtime_pm_support() {
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::On));
     }
 
     if let Some(model_profiles) = ModelProfiles::new() {
-        catch!(errors, model_profiles.battery.set());
+        catch!(errors, model_profiles.quiet.set());
     }
 }
 
@@ -164,26 +131,7 @@ fn pstate_values(values: PStateValues) -> Result<(), PStateError> {
     Ok(())
 }
 
-/// Iterates across all backlights in the supplied iterator, executing the given strategy function
-/// on each discovered backlight source.
-fn iterate_backlights<B: Brightness>(
-    iterator: impl Iterator<Item = io::Result<B>>,
-    strategy: &dyn Fn(&B, u64) -> io::Result<()>,
-    value: u64,
-) -> Result<(), BacklightError> {
-    for backlight in iterator {
-        match backlight {
-            Ok(ref backlight) => set_backlight(strategy, backlight, value)?,
-            Err(why) => {
-                log::warn!("failed to iterate keyboard backlight: {}", why);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Iterates on all available PCI devices, disabling or enabling runtime power mangement.
+/// Iterates on all available PCI devices, disabling or enabling runtime power management.
 fn pci_device_runtime_pm(pm: RuntimePowerManagement) -> Result<(), PciDeviceError> {
     for device in PciDevice::iter() {
         match device {
@@ -199,8 +147,8 @@ fn pci_device_runtime_pm(pm: RuntimePowerManagement) -> Result<(), PciDeviceErro
     Ok(())
 }
 
-/// Iterates on all available SCSI/SATA hosts, setting the first link time power mangement policy
-/// that succeeeds.
+/// Iterates on all available SCSI/SATA hosts, setting the first link time power management policy
+/// that succeeds.
 fn scsi_host_link_time_pm_policy(policies: &'static [&'static str]) -> Result<(), ScsiHostError> {
     for device in ScsiHost::iter() {
         match device {
@@ -218,17 +166,8 @@ fn scsi_host_link_time_pm_policy(policies: &'static [&'static str]) -> Result<()
     Ok(())
 }
 
-/// Generically sets a backlight value to the backlight, using the provided strategy function.
-fn set_backlight<B: Brightness>(
-    strategy: impl Fn(&B, u64) -> io::Result<()>,
-    backlight: &B,
-    value: u64,
-) -> Result<(), BacklightError> {
-    strategy(backlight, value)
-        .map_err(|why| BacklightError::Set(backlight.id().to_owned(), why))?;
-    Ok(())
-}
-
+/// Per-model power limit and thermal tuning. Keeps the framework for adding
+/// desktop-specific profiles later.
 pub struct ModelProfile {
     pl1:        Option<u8>,
     pl2:        Option<u8>,
@@ -236,18 +175,14 @@ pub struct ModelProfile {
 }
 
 impl ModelProfile {
-    // TODO pub fn get() -> Result<Self, ModelError> {}
-
     pub fn set(&self) -> Result<(), ModelError> {
-        // Thermald sets pl1 and pl2 on its own, conflicting with system76-power
+        // Thermald sets pl1 and pl2 on its own, conflicting with us
         let _status = Command::new("systemctl")
             .arg("stop")
             .arg("thermald.service")
             .status()
             .map_err(ModelError::Thermald)?;
-        // TODO: check status, allow thermald to be missing
 
-        // Set PL1
         if let Some(pl1) = self.pl1 {
             fs::write(
                 "/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw",
@@ -256,7 +191,6 @@ impl ModelProfile {
             .map_err(ModelError::Pl1)?;
         }
 
-        // Set PL2
         if let Some(pl2) = self.pl2 {
             fs::write(
                 "/sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw",
@@ -265,7 +199,6 @@ impl ModelProfile {
             .map_err(ModelError::Pl2)?;
         }
 
-        // Set TCC
         if let Some(tcc_offset) = self.tcc_offset {
             let path = Path::new("/dev/cpu/0/msr");
             if !path.is_file() {
@@ -295,49 +228,16 @@ impl ModelProfile {
 pub struct ModelProfiles {
     pub balanced:    ModelProfile,
     pub performance: ModelProfile,
-    pub battery:     ModelProfile,
+    pub quiet:       ModelProfile,
 }
 
 impl ModelProfiles {
+    /// Returns model-specific power profiles if the running hardware has a
+    /// known configuration. Currently empty, ready for desktop entries.
     pub fn new() -> Option<Self> {
-        let model_line =
+        let _model_line =
             fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
-        match model_line.trim() {
-            "galp5" => Some(Self {
-                balanced:    ModelProfile {
-                    pl1:        Some(28),
-                    pl2:        None,     // galp5 doesn't like setting pl2
-                    tcc_offset: Some(12), // 88 C
-                },
-                performance: ModelProfile {
-                    pl1:        Some(40),
-                    pl2:        None,    // galp5 doesn't like setting pl2
-                    tcc_offset: Some(7), // 93 C
-                },
-                battery:     ModelProfile {
-                    pl1:        Some(12),
-                    pl2:        None,     // galp5 doesn't like setting pl2
-                    tcc_offset: Some(32), // 68 C
-                },
-            }),
-            "lemp9" => Some(Self {
-                balanced:    ModelProfile {
-                    pl1:        Some(20),
-                    pl2:        Some(40), // Upped from 30
-                    tcc_offset: Some(12), // 88 C
-                },
-                performance: ModelProfile {
-                    pl1:        Some(30),
-                    pl2:        Some(50),
-                    tcc_offset: Some(2), // 98 C
-                },
-                battery:     ModelProfile {
-                    pl1:        Some(10),
-                    pl2:        Some(30),
-                    tcc_offset: Some(32), // 68 C
-                },
-            }),
-            _ => None,
-        }
+        // Add desktop model entries here as needed.
+        None
     }
 }

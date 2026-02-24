@@ -7,8 +7,6 @@ use std::{io, path::PathBuf, process};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileError {
-    #[error("failed to set backlight profiles: {0}")]
-    Backlight(#[from] BacklightError),
     #[error("failed to set disk power profiles: {0}")]
     DiskPower(#[from] DiskPowerError),
     #[error("failed to set model profiles: {0}")]
@@ -19,12 +17,6 @@ pub enum ProfileError {
     PState(#[from] PStateError),
     #[error("failed to set scsi host profiles: {0}")]
     ScsiHost(#[from] ScsiHostError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum BacklightError {
-    #[error("failed to set backlight on {0}: {1}")]
-    Set(String, io::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
