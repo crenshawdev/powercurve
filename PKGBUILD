@@ -1,5 +1,5 @@
 pkgname=vintagetechie-power-git
-pkgver=1.2.9.r468.7c7aaeb
+pkgver=1.2.9.r469.865486c
 pkgrel=1
 pkgdesc="Desktop power management with per-channel fan control for Thelio systems"
 arch=('x86_64' 'aarch64')
