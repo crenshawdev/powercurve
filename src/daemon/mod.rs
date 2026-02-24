@@ -6,12 +6,10 @@ use anyhow::Context;
 use std::{
     collections::HashMap,
     fmt::Display,
-    fs,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    thread,
     time::Duration,
 };
 use tokio::{
@@ -22,23 +20,16 @@ use tokio::{
 use zbus::Interface;
 
 use crate::{
-    charge_thresholds::{get_charge_profiles, get_charge_thresholds, set_charge_thresholds},
     errors::ProfileError,
     fan::FanDaemon,
-    graphics::{Graphics, GraphicsMode},
-    hid_backlight,
-    hotplug::{mux, Detect, HotPlugDetect},
+    graphics::Graphics,
     kernel_parameters::{KernelParameter, NmiWatchdog},
-    runtime_pm::{runtime_pm_quirks, thunderbolt_hotplug_wakeup},
     DBUS_NAME, DBUS_PATH,
 };
 
 mod profiles;
-use self::profiles::{balanced, battery, performance};
+use self::profiles::{balanced, performance, quiet};
 
-use system76_power_zbus::ChargeProfile;
-
-const THRESHOLD_POLICY: &str = "com.system76.powerdaemon.set-charge-thresholds";
 const NET_HADESS_POWER_PROFILES_DBUS_NAME: &str = "net.hadess.PowerProfiles";
 const NET_HADESS_POWER_PROFILES_DBUS_PATH: &str = "/net/hadess/PowerProfiles";
 const POWER_PROFILES_DBUS_NAME: &str = "org.freedesktop.UPower.PowerProfiles";
@@ -67,8 +58,6 @@ static PCI_RUNTIME_PM: AtomicBool = AtomicBool::new(true);
 pub(crate) fn pci_runtime_pm_support() -> bool { PCI_RUNTIME_PM.load(Ordering::SeqCst) }
 
 struct PowerDaemon {
-    initial_set:    bool,
-    graphics:       Graphics,
     power_profile:  String,
     profile_errors: Vec<ProfileError>,
     held_profiles:  Vec<(u32, &'static str, String, String)>,
@@ -77,24 +66,20 @@ struct PowerDaemon {
 }
 
 impl PowerDaemon {
-    fn new() -> anyhow::Result<Self> {
-        let graphics = Graphics::new()?;
-
-        Ok(Self {
-            initial_set: false,
-            graphics,
+    fn new() -> Self {
+        Self {
             power_profile: String::new(),
             profile_errors: Vec::new(),
             held_profiles: Vec::new(),
             profile_ids: 0,
             connections: None,
-        })
+        }
     }
 
     async fn apply_profile(
         &mut self,
         context: &zbus::SignalContext<'_>,
-        func: fn(&mut Vec<ProfileError>, bool),
+        func: fn(&mut Vec<ProfileError>),
         name: &str,
     ) -> Result<(), String> {
         if self.power_profile == name {
@@ -104,7 +89,7 @@ impl PowerDaemon {
 
         let _res = System76Power::power_profile_switch(context, name).await;
 
-        func(&mut self.profile_errors, self.initial_set);
+        func(&mut self.profile_errors);
 
         self.power_profile = name.into();
 
@@ -164,7 +149,7 @@ impl System76Power {
 
 #[zbus::dbus_interface(name = "com.system76.PowerDaemon")]
 impl System76Power {
-    async fn battery(
+    async fn quiet(
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
@@ -172,7 +157,7 @@ impl System76Power {
             .0
             .lock()
             .await
-            .apply_profile(&context, battery, "Battery")
+            .apply_profile(&context, quiet, "Quiet")
             .await
             .map_err(zbus_error_from_display);
 
@@ -225,120 +210,6 @@ impl System76Power {
     async fn get_profile(&self) -> zbus::fdo::Result<String> {
         Ok(self.0.lock().await.power_profile.clone())
     }
-
-    #[dbus_interface(out_args("required"))]
-    async fn get_external_displays_require_dgpu(&mut self) -> zbus::fdo::Result<bool> {
-        self.0
-            .lock()
-            .await
-            .graphics
-            .get_external_displays_require_dgpu()
-            .map_err(zbus_error_from_display)
-    }
-
-    #[dbus_interface(out_args("vendor"))]
-    async fn get_default_graphics(&self) -> zbus::fdo::Result<String> {
-        self.0
-            .lock()
-            .await
-            .graphics
-            .get_default_graphics()
-            .map_err(zbus_error_from_display)
-            .map(|mode| <&'static str>::from(mode).to_owned())
-    }
-
-    #[dbus_interface(out_args("vendor"))]
-    async fn get_graphics(&self) -> zbus::fdo::Result<String> {
-        self.0
-            .lock()
-            .await
-            .graphics
-            .get_vendor()
-            .map_err(zbus_error_from_display)
-            .map(|mode| <&'static str>::from(mode).to_owned())
-    }
-
-    async fn set_graphics(&mut self, vendor: &str) -> zbus::fdo::Result<()> {
-        self.0
-            .lock()
-            .await
-            .graphics
-            .set_vendor(GraphicsMode::from(vendor))
-            .map_err(zbus_error_from_display)
-    }
-
-    #[dbus_interface(out_args("desktop"))]
-    async fn get_desktop(&mut self) -> zbus::fdo::Result<bool> {
-        Ok(self.0.lock().await.graphics.is_desktop())
-    }
-
-    #[dbus_interface(out_args("switchable"))]
-    async fn get_switchable(&mut self) -> zbus::fdo::Result<bool> {
-        Ok(self.0.lock().await.graphics.can_switch())
-    }
-
-    #[dbus_interface(out_args("power"))]
-    async fn get_graphics_power(&mut self) -> zbus::fdo::Result<bool> {
-        self.0.lock().await.graphics.get_power().map_err(zbus_error_from_display)
-    }
-
-    async fn set_graphics_power(&mut self, power: bool) -> zbus::fdo::Result<()> {
-        self.0.lock().await.graphics.set_power(power).map_err(zbus_error_from_display)
-    }
-
-    async fn auto_graphics_power(&mut self) -> zbus::fdo::Result<()> {
-        self.0.lock().await.graphics.auto_power().map_err(zbus_error_from_display)
-    }
-
-    #[dbus_interface(out_args("start", "end"))]
-    async fn get_charge_thresholds(&mut self) -> zbus::fdo::Result<(u8, u8)> {
-        get_charge_thresholds().map_err(zbus_error_from_display)
-    }
-
-    async fn set_charge_thresholds(&mut self, thresholds: (u8, u8)) -> zbus::fdo::Result<()> {
-        let connection = zbus::Connection::system().await?;
-        let polkit = zbus_polkit::policykit1::AuthorityProxy::new(&connection)
-            .await
-            .context("could not connect to polkit authority daemon")
-            .map_err(zbus_error_from_display)?;
-
-        let pid = std::process::id();
-
-        let permitted = if pid == 0 {
-            true
-        } else {
-            let subject = zbus_polkit::policykit1::Subject::new_for_owner(pid, None, None)
-                .context("could not create policykit1 subject")
-                .map_err(zbus_error_from_display)?;
-
-            polkit
-                .check_authorization(
-                    &subject,
-                    THRESHOLD_POLICY,
-                    &std::collections::HashMap::new(),
-                    Default::default(),
-                    "",
-                )
-                .await
-                .context("could not check policykit authorization")
-                .map_err(zbus_error_from_display)?
-                .is_authorized
-        };
-
-        if permitted {
-            set_charge_thresholds(thresholds).map_err(zbus_error_from_display)
-        } else {
-            Err(zbus_error_from_display("Operation not permitted by Polkit"))
-        }
-    }
-
-    #[dbus_interface(out_args("profiles"))]
-    async fn get_charge_profiles(&mut self) -> zbus::fdo::Result<Vec<ChargeProfile>> {
-        Ok(get_charge_profiles())
-    }
-
-    #[dbus_interface(signal)]
-    async fn hot_plug_detect(context: &zbus::SignalContext<'_>, port: u64) -> zbus::Result<()>;
 
     #[dbus_interface(signal)]
     async fn power_profile_switch(
@@ -426,8 +297,8 @@ impl UPowerPowerProfiles {
 
     #[dbus_interface(property)]
     async fn set_active_profile(&mut self, profile: &str) {
-        let (func, profile): (fn(&mut Vec<ProfileError>, bool), &'static str) = match profile {
-            "power-saver" => (battery, "Battery"),
+        let (func, profile): (fn(&mut Vec<ProfileError>), &'static str) = match profile {
+            "power-saver" => (quiet, "Quiet"),
             "balanced" => (balanced, "Balanced"),
             "performance" => (performance, "Performance"),
             _ => return,
@@ -478,7 +349,7 @@ impl UPowerPowerProfiles {
     async fn actions(&self) -> Vec<String> { vec![] }
 
     #[dbus_interface(property)]
-    async fn version(&self) -> &str { "system76-power 1.2.1" }
+    async fn version(&self) -> &str { env!("CARGO_PKG_VERSION") }
 }
 
 pub struct NetHadessPowerProfiles(UPowerPowerProfiles);
@@ -506,7 +377,6 @@ impl NetHadessPowerProfiles {
 }
 
 #[tokio::main(flavor = "current_thread")]
-#[allow(clippy::too_many_lines)]
 pub async fn daemon() -> anyhow::Result<()> {
     let signal_handling_fut = signal_handling();
 
@@ -516,40 +386,15 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     PCI_RUNTIME_PM.store(pci_runtime_pm, Ordering::SeqCst);
 
-    let daemon = PowerDaemon::new()?;
-
-    let nvidia_exists = !daemon.graphics.nvidia.is_empty();
+    let graphics = Graphics::new()?;
+    let nvidia_exists = !graphics.nvidia.is_empty();
 
     NmiWatchdog.set(b"0");
 
-    // Get the NVIDIA device ID before potentially removing it.
-    let nvidia_device_id = if nvidia_exists {
-        fs::read_to_string("/sys/bus/pci/devices/0000:01:00.0/device").ok()
-    } else {
-        None
-    };
-
-    let daemon = Arc::new(Mutex::new(daemon));
+    let daemon = Arc::new(Mutex::new(PowerDaemon::new()));
     let mut system76_daemon = System76Power(daemon.clone());
 
-    match system76_daemon.auto_graphics_power().await {
-        Ok(()) => (),
-        Err(err) => {
-            log::warn!("Failed to set automatic graphics power: {}", err);
-        }
-    }
-
-    let vendor = fs::read_to_string("/sys/class/dmi/id/sys_vendor")?;
-    let model = fs::read_to_string("/sys/class/dmi/id/product_version")?;
-    match runtime_pm_quirks(&vendor, &model) {
-        Ok(()) => (),
-        Err(err) => {
-            log::warn!("Failed to set runtime power management quirks: {}", err);
-        }
-    }
-
-    // Register DBus interface for org.freedesktop.UPower.PowerProfiles.
-    // This is used by powerprofilesctl
+    // powerprofilesctl
     let upp_connection = zbus::ConnectionBuilder::system()
         .context("failed to create zbus connection builder")?
         .name(POWER_PROFILES_DBUS_NAME)
@@ -560,8 +405,7 @@ pub async fn daemon() -> anyhow::Result<()> {
         .await
         .context("unable to create system service for org.freedesktop.UPower.PowerProfiles")?;
 
-    // Register DBus interface for net.hadess.PowerProfiles.
-    // This is used by gnome-shell
+    // gnome-shell
     let hadess_connection = zbus::ConnectionBuilder::system()
         .context("failed to create zbus connection builder")?
         .name(NET_HADESS_POWER_PROFILES_DBUS_NAME)
@@ -575,7 +419,6 @@ pub async fn daemon() -> anyhow::Result<()> {
         .await
         .context("unable to create system service for net.hadess.PowerProfiles")?;
 
-    // Register DBus interface for com.system76.PowerDaemon.
     let connection = zbus::ConnectionBuilder::system()
         .context("failed to create zbus connection builder")?
         .name(DBUS_NAME)
@@ -596,53 +439,12 @@ pub async fn daemon() -> anyhow::Result<()> {
         log::warn!("Failed to set initial profile: {}", why);
     }
 
-    system76_daemon.0.lock().await.initial_set = true;
-
-    // Spawn hid backlight daemon
-    let _hid_backlight = thread::spawn(hid_backlight::daemon);
     let mut fan_daemon = FanDaemon::new(nvidia_exists);
-    let mut hpd_res = unsafe { HotPlugDetect::new(nvidia_device_id) };
-    let mux_res = unsafe { mux::DisplayPortMux::new() };
-    let mut hpd = || -> [bool; 4] {
-        if let Ok(ref mut hpd) = hpd_res {
-            unsafe { hpd.detect() }
-        } else {
-            [false; 4]
-        }
-    };
 
     let main_loop = async move {
-        let mut last = hpd();
-
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
-
             fan_daemon.step();
-
-            // HACK: As of Linux 6.9.3, TBT5 controller must be active for HPD
-            // to work on USB-C ports.
-            match thunderbolt_hotplug_wakeup(&vendor, &model) {
-                Ok(()) => (),
-                Err(err) => {
-                    log::warn!("Failed to wakeup thunderbolt on hotplug: {}", err);
-                }
-            }
-
-            let hpd = hpd();
-            for i in 0..hpd.len() {
-                if hpd[i] != last[i] && hpd[i] {
-                    log::info!("HotPlugDetect {}", i);
-                    let _res = System76Power::hot_plug_detect(&context, i as u64).await;
-                }
-            }
-
-            last = hpd;
-
-            if let Ok(ref mux) = mux_res {
-                unsafe {
-                    mux.step();
-                }
-            }
         }
     };
 
@@ -655,7 +457,7 @@ pub async fn daemon() -> anyhow::Result<()> {
 
 fn system76_profile_to_upp_str(system76_profile: &str) -> &'static str {
     match system76_profile {
-        "Battery" => "power-saver",
+        "Quiet" => "power-saver",
         "Balanced" => "balanced",
         "Performance" => "performance",
         _ => "unknown",

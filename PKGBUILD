@@ -7,15 +7,8 @@ url="https://codeberg.org/VintageTechie/vintagetechie-power"
 license=('GPL-3.0-or-later')
 depends=(
   'dbus'
-  'hidapi'
-  'libusb'
-  'polkit'
 )
 makedepends=('cargo' 'git')
-optdepends=(
-  'system76-acpi-dkms: only needed for systems using open firmware with kernels <5.16'
-  'system76-dkms: needed for systems using proprietary firmware'
-)
 provides=('system76-power' 'power-profiles-daemon')
 conflicts=('system76-power' 'power-profiles-daemon')
 backup=('etc/system76-power/fan.toml')
@@ -41,13 +34,11 @@ build() {
   CFLAGS+=" -ffat-lto-objects"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
-  export HIDAPI_LINK_FLAGS="-lhidapi-hidraw"
   make
 }
 
 package() {
   cd "vintagetechie-power"
   export CARGO_TARGET_DIR=target
-  export HIDAPI_LINK_FLAGS="-lhidapi-hidraw"
   make DESTDIR="${pkgdir}" install
 }

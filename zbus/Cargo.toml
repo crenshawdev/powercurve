@@ -4,6 +4,4 @@ version = "1.2.1"
 edition = "2021"
 
 [dependencies]
-serde.workspace = true
 zbus = "3.0.0"
-zvariant = "3.0.0"

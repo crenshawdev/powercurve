@@ -23,8 +23,8 @@ pub fn set(profile: Profile, max_percent: u8) {
 
         // Decide the scaling governor to use with this profile.
         let governor = match profile {
-            // Prefer battery life over efficiency
-            Profile::Battery => match driver {
+            // Low power, low noise
+            Profile::Quiet => match driver {
                 "amd-pstate" | "intel_pstate" => "powersave",
                 "amd-pstate-epp" => {
                     epp = Some("balance_power");
