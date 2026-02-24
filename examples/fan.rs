@@ -6,28 +6,10 @@ use system76_power::{
 };
 
 fn inner() -> Result<(), FanDaemonError> {
-    let daemon = FanDaemon::new(false);
+    let mut daemon = FanDaemon::new(false);
 
     loop {
-        if let Some(temp) = daemon.get_temp() {
-            if let Some(duty) = daemon.get_duty(temp) {
-                println!(
-                    "{}°C ({}): {}% ({})",
-                    (temp as f32) / 1000.0,
-                    temp,
-                    (u32::from(duty) * 100) / 255,
-                    duty,
-                );
-            } else {
-                println!(
-                    "{}°C ({}): Fan curve does not specify duty",
-                    (temp as f32) / 1000.0,
-                    temp,
-                );
-            }
-        } else {
-            println!("Failed to read temperature");
-        }
+        daemon.step();
         thread::sleep(time::Duration::new(1, 0));
     }
 }
