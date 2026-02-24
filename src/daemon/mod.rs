@@ -24,6 +24,7 @@ use crate::{
     fan::FanDaemon,
     graphics::Graphics,
     kernel_parameters::{KernelParameter, NmiWatchdog},
+    state,
     DBUS_NAME, DBUS_PATH,
 };
 
@@ -92,6 +93,7 @@ impl PowerDaemon {
         func(&mut self.profile_errors);
 
         self.power_profile = name.into();
+        state::save_profile(name);
 
         if self.profile_errors.is_empty() {
             Ok(())
@@ -435,8 +437,17 @@ pub async fn daemon() -> anyhow::Result<()> {
     let context = zbus::SignalContext::new(&connection, DBUS_PATH)
         .context("unable to create signal context")?;
 
-    if let Err(why) = power_service.balanced(context.clone()).await {
-        log::warn!("Failed to set initial profile: {}", why);
+    let initial_profile = state::load_profile().unwrap_or_else(|| String::from("Balanced"));
+    log::info!("restoring profile: {}", initial_profile);
+
+    let init_result = match initial_profile.as_str() {
+        "Quiet" => power_service.quiet(context.clone()).await,
+        "Performance" => power_service.performance(context.clone()).await,
+        _ => power_service.balanced(context.clone()).await,
+    };
+
+    if let Err(why) = init_result {
+        log::warn!("failed to set initial profile: {}", why);
     }
 
     let mut fan_daemon = FanDaemon::new(nvidia_exists);
