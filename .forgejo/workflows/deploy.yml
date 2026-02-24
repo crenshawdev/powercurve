@@ -25,6 +25,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           pkg=$(ls vintagetechie-power-git-*-x86_64.pkg.tar.zst | head -1)
 
+          rm -rf /tmp/repo
           git clone --branch pages \
             "https://VintageTechie:${DEPLOY_TOKEN}@codeberg.org/VintageTechie/vintagetechie-arch-repo.git" \
             /tmp/repo
