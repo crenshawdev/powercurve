@@ -17,6 +17,7 @@ pub mod module;
 pub mod pci;
 pub mod radeon;
 pub mod snd;
+pub mod state;
 pub mod util;
 
 pub static DBUS_NAME: &str = "com.vintagetechie.PowerDaemon";
