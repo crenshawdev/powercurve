@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-#![allow(unused)]
 pub use sysfs_class::RuntimePowerManagement;
 
 use std::{
@@ -108,13 +107,10 @@ macro_rules! dynamic_parameters {
 static_parameters! {
     DirtyExpire { dirty_expire: "/proc/sys/vm/dirty_expire_centisecs" },
     DirtyWriteback { dirty_writeback: "/proc/sys/vm/dirty_writeback_centisecs" },
-    NmiWatchdog { nmi_watchdog : "/proc/sys/kernel/nmi_watchdog" },
-    PcieAspm { pcie_aspm: "/sys/module/pcie_aspm/parameters/policy" }
+    NmiWatchdog { nmi_watchdog : "/proc/sys/kernel/nmi_watchdog" }
 }
 
 dynamic_parameters! {
-    DiskIoSched { disk_io_scheduler: "/sys/block/{}/queue/scheduler" },
-    PhcControls { phc_controls: "/sys/devices/system/cpu/cpu{}/cpufreq/phc_controls" },
     RadeonDpmState { radeon_dpm_state: "{}/power_dpm_state" },
     RadeonDpmForcePerformance {
         radeon_dpm_force_performance_level: "{}/power_dpm_force_performance_level"
@@ -122,7 +118,6 @@ dynamic_parameters! {
     RadeonPowerMethod { radeon_power_method: "{}/power_method" },
     RadeonPowerProfile { radeon_power_profile: "{}/power_profile" },
     PowerSave { power_save: "/sys/module/{}/parameters/power_save" },
-    PowerLevel { power_level: "/sys/module/{}/parameters/power_level" },
     PowerSaveController {
         power_save_controller: "/sys/module/{}/parameters/power_save_controller"
     }

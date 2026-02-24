@@ -17,7 +17,6 @@ pub mod module;
 pub mod pci;
 pub mod radeon;
 pub mod snd;
-pub mod sys_devices;
 pub mod util;
 
 pub static DBUS_NAME: &str = "com.system76.PowerDaemon";
