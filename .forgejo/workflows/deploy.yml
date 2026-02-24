@@ -7,159 +7,33 @@ on:
 
 jobs:
   build-deploy:
-    runs-on: codeberg-medium
+    runs-on: arch-local
     steps:
-      - name: Checkout code
-        uses: https://code.forgejo.org/actions/checkout@v4
+      - uses: https://code.forgejo.org/actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: https://github.com/dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
+      - name: Build package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config zstd libarchive-tools fakeroot
-
-      - name: Build and install to staging directory
-        run: |
-          make
-          fakeroot make DESTDIR="$(pwd)/pkg" install
-
-      - name: Create pacman package
-        run: |
-          ver=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          rev_count=$(git rev-list --count HEAD)
-          short_hash=$(git rev-parse --short HEAD)
-          pkgver="${ver}.r${rev_count}.${short_hash}"
-
-          installed_size=$(find pkg -type f -exec stat -c%s {} + | awk '{s+=$1} END {print s}')
-          builddate=$(date +%s)
-
-          cat > pkg/.PKGINFO <<PKGINFO
-          pkgname = vintagetechie-power-git
-          pkgver = ${pkgver}-1
-          pkgdesc = Desktop power management with per-channel fan control for Thelio systems
-          url = https://codeberg.org/VintageTechie/vintagetechie-power
-          builddate = ${builddate}
-          packager = VintageTechie <noreply@codeberg.org>
-          size = ${installed_size}
-          arch = x86_64
-          license = GPL-3.0-or-later
-          depend = dbus
-          provides = system76-power
-          provides = power-profiles-daemon
-          conflict = system76-power
-          conflict = power-profiles-daemon
-          backup = etc/system76-power/fan.toml
-          PKGINFO
-          sed -i 's/^          //' pkg/.PKGINFO
-
-          cd pkg
-
-          fakeroot bsdtar -czf .MTREE \
-            --format=mtree \
-            --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
-            .PKGINFO usr etc
-
-          pkgfile="vintagetechie-power-git-${pkgver}-1-x86_64.pkg.tar.zst"
-          fakeroot bsdtar -cf - .PKGINFO .MTREE usr etc | zstd -o "../${pkgfile}"
-          cd ..
-
-          echo "PKGFILE=${pkgfile}" >> "$GITHUB_ENV"
-          echo "PKGVER=${pkgver}" >> "$GITHUB_ENV"
+          export CARGO_TARGET_DIR=target
+          makepkg -sf --noconfirm
 
       - name: Deploy to arch repo
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
           tag="${GITHUB_REF_NAME}"
+          pkg=$(ls vintagetechie-power-git-*-x86_64.pkg.tar.zst | head -1)
 
           git clone --branch pages \
             "https://VintageTechie:${DEPLOY_TOKEN}@codeberg.org/VintageTechie/vintagetechie-arch-repo.git" \
             /tmp/repo
 
           rm -f /tmp/repo/x86_64/vintagetechie-power-git-*.pkg.tar.zst
-          cp "${PKGFILE}" /tmp/repo/x86_64/
-
-          csize=$(stat -c%s "${PKGFILE}")
-          sha256=$(sha256sum "${PKGFILE}" | awk '{print $1}')
-          installed_size=$(find pkg -type f -exec stat -c%s {} + | awk '{s+=$1} END {print s}')
-          builddate=$(date +%s)
-
-          mkdir -p /tmp/db-work
-          if [ -f /tmp/repo/x86_64/vintagetechie-arch-repo.db.tar.gz ]; then
-            bsdtar xzf /tmp/repo/x86_64/vintagetechie-arch-repo.db.tar.gz -C /tmp/db-work 2>/dev/null || true
-          fi
-
-          rm -rf /tmp/db-work/vintagetechie-power-git-*
-
-          entry="vintagetechie-power-git-${PKGVER}-1"
-          mkdir -p "/tmp/db-work/${entry}"
-          cat > "/tmp/db-work/${entry}/desc" <<DESC
-          %FILENAME%
-          ${PKGFILE}
-
-          %NAME%
-          vintagetechie-power-git
-
-          %BASE%
-          vintagetechie-power-git
-
-          %VERSION%
-          ${PKGVER}-1
-
-          %DESC%
-          Desktop power management with per-channel fan control for Thelio systems
-
-          %CSIZE%
-          ${csize}
-
-          %ISIZE%
-          ${installed_size}
-
-          %SHA256SUM%
-          ${sha256}
-
-          %URL%
-          https://codeberg.org/VintageTechie/vintagetechie-power
-
-          %LICENSE%
-          GPL-3.0-or-later
-
-          %ARCH%
-          x86_64
-
-          %BUILDDATE%
-          ${builddate}
-
-          %PACKAGER%
-          VintageTechie <noreply@codeberg.org>
-
-          %DEPENDS%
-          dbus
-
-          %PROVIDES%
-          system76-power
-          power-profiles-daemon
-
-          %CONFLICTS%
-          system76-power
-          power-profiles-daemon
-
-          DESC
-          sed -i 's/^          //' "/tmp/db-work/${entry}/desc"
-
-          cd /tmp/db-work
-          bsdtar czf /tmp/repo/x86_64/vintagetechie-arch-repo.db.tar.gz *
+          cp "$pkg" /tmp/repo/x86_64/
 
           cd /tmp/repo/x86_64
-          rm -f vintagetechie-arch-repo.db
-          ln -s vintagetechie-arch-repo.db.tar.gz vintagetechie-arch-repo.db
-          rm -f vintagetechie-arch-repo.files vintagetechie-arch-repo.files.tar.gz
-          cp vintagetechie-arch-repo.db.tar.gz vintagetechie-arch-repo.files.tar.gz
-          ln -s vintagetechie-arch-repo.files.tar.gz vintagetechie-arch-repo.files
+          repo-add vintagetechie-arch-repo.db.tar.gz "$pkg"
 
           cd /tmp/repo
           git config user.name "VintageTechie"
