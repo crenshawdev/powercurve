@@ -1,0 +1,54 @@
+# All fans go to max when either threshold is hit.
+critical_cpu_temp = 85
+critical_gpu_temp = 80
+
+# Fan curve. Temps in Celsius, duty in percent.
+# Even 5-degree steps, 100% at 75C so critical thresholds have room to work.
+[[curve]]
+temp = 35.0
+duty = 0
+
+[[curve]]
+temp = 40.0
+duty = 15
+
+[[curve]]
+temp = 45.0
+duty = 25
+
+[[curve]]
+temp = 50.0
+duty = 35
+
+[[curve]]
+temp = 55.0
+duty = 45
+
+[[curve]]
+temp = 60.0
+duty = 55
+
+[[curve]]
+temp = 65.0
+duty = 65
+
+[[curve]]
+temp = 70.0
+duty = 80
+
+[[curve]]
+temp = 75.0
+duty = 100
+
+# pwm1 = CPU fan, pwm2 = intake, pwm3 = GPU fan
+[[channels]]
+pwm = "pwm1"
+source = "cpu"
+
+[[channels]]
+pwm = "pwm2"
+source = "all"
+
+[[channels]]
+pwm = "pwm3"
+source = "gpu"

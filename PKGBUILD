@@ -1,5 +1,5 @@
 pkgname=system76-power-custom-git
-pkgver=1.2.9.r463.c7c1920
+pkgver=1.2.9.r465.ae9b4e3
 pkgrel=1
 pkgdesc="System76 Power Management (custom fan control)"
 arch=('x86_64' 'aarch64')
@@ -16,9 +16,10 @@ optdepends=(
   'system76-dkms: needed for systems using proprietary firmware'
 )
 provides=('system76-power' 'power-profiles-daemon')
-conflicts=('system76-power')
+conflicts=('system76-power' 'power-profiles-daemon')
+backup=('etc/system76-power/fan.toml')
 install="system76-power.install"
-source=("git+ssh://git@codeberg.org/VintageTechie/system76-power-custom.git")
+source=("git+https://codeberg.org/VintageTechie/system76-power-custom.git")
 sha256sums=('SKIP')
 
 pkgver() {

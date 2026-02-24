@@ -37,6 +37,7 @@ install: all
 	install -D -m 0644 "data/$(ID).service" "$(DESTDIR)$(libdir)/systemd/system/$(ID).service"
 	install -D -m 0644 "data/$(ID).xml" "$(DESTDIR)$(datadir)/dbus-1/interfaces/$(ID).xml"
 	install -D -m 0755 "target/release/$(BIN)" "$(DESTDIR)$(bindir)/$(BIN)"
+	install -D -m 0644 "data/fan.toml" "$(DESTDIR)/etc/system76-power/fan.toml"
 
 uninstall:
 	rm -f "$(DESTDIR)$(bindir)/$(ID)"
