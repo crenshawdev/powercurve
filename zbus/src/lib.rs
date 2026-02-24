@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #[zbus::dbus_proxy(
-    interface = "com.system76.PowerDaemon",
-    default_service = "com.system76.PowerDaemon",
-    default_path = "/com/system76/PowerDaemon"
+    interface = "com.vintagetechie.PowerDaemon",
+    default_service = "com.vintagetechie.PowerDaemon",
+    default_path = "/com/vintagetechie/PowerDaemon"
 )]
 trait PowerDaemon {
     /// Quiet method

@@ -6,7 +6,7 @@ use crate::args::Args;
 use anyhow::Context;
 use intel_pstate::PState;
 use std::io;
-use system76_power_zbus::PowerDaemonProxy;
+use vintagetechie_power_zbus::PowerDaemonProxy;
 
 async fn profile(client: &mut PowerDaemonProxy<'_>) -> io::Result<()> {
     let profile = client.get_profile().await.ok();
@@ -32,7 +32,7 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
 
     let mut client = PowerDaemonProxy::new(&connection)
         .await
-        .context("failed to connect to system76-power daemon")?;
+        .context("failed to connect to vintagetechie-power daemon")?;
 
     match args {
         Args::Profile { profile: name } => match name.as_deref() {
