@@ -170,7 +170,7 @@ impl FanDaemon {
             .filter_map(|temp| temp.input().ok())
             .fold(None, |best, input| {
                 let val = input as u32;
-                if best.map_or(true, |b| val > b) {
+                if best.is_none_or(|b| val > b) {
                     log::debug!("highest cpu temp: {}", val);
                     Some(val)
                 } else {
@@ -188,7 +188,7 @@ impl FanDaemon {
             .filter_map(|temp| temp.input().ok())
             .fold(None, |best, input| {
                 let val = input as u32;
-                if best.map_or(true, |b| val > b) {
+                if best.is_none_or(|b| val > b) {
                     log::debug!("highest amdgpu temp: {}", val);
                     Some(val)
                 } else {
@@ -242,7 +242,7 @@ impl FanDaemon {
         for platform in &self.platforms {
             if let Some(duty) = duty_opt {
                 let _ = platform.write_file("pwm1_enable", "1");
-                let _ = platform.write_file(pwm, &format!("{}", duty));
+                let _ = platform.write_file(pwm, format!("{}", duty));
             } else {
                 let _ = platform.write_file("pwm1_enable", "2");
             }
@@ -257,8 +257,8 @@ impl FanDaemon {
         if self.discover().is_ok() {
             let cpu_temp = self.get_cpu_temp();
             let gpu_temp = self.get_gpu_temp();
-            let critical = cpu_temp.map_or(false, |t| t >= self.critical_cpu_temp)
-                || gpu_temp.map_or(false, |t| t >= self.critical_gpu_temp);
+            let critical = cpu_temp.is_some_and(|t| t >= self.critical_cpu_temp)
+                || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
 
             if critical {
                 log::warn!("critical temp reached, all fans to max");
@@ -517,7 +517,7 @@ pub fn nvidia_temperatures<F: FnMut(u32)>(func: F) -> io::Result<()> {
         .output()?;
 
     let stdout = String::from_utf8(output.stdout)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "non-utf8 output"))?;
+        .map_err(|_| io::Error::other("non-utf8 output"))?;
 
     stdout.lines().filter_map(|line| line.parse::<u32>().ok()).for_each(func);
 

@@ -318,7 +318,7 @@ impl UPowerPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn profiles(&self) -> Vec<HashMap<&'static str, zvariant::Value>> {
+    async fn profiles(&self) -> Vec<HashMap<&'static str, zvariant::Value<'_>>> {
         vec![
             {
                 let mut map = HashMap::new();
@@ -345,7 +345,7 @@ impl UPowerPowerProfiles {
     async fn performance_inhibited(&self) -> &str { "" }
 
     #[dbus_interface(property)]
-    async fn active_profile_holds(&self) -> Vec<HashMap<String, zvariant::Value>> { Vec::new() }
+    async fn active_profile_holds(&self) -> Vec<HashMap<String, zvariant::Value<'_>>> { Vec::new() }
 
     #[dbus_interface(property)]
     async fn actions(&self) -> Vec<String> { vec![] }
@@ -370,7 +370,7 @@ impl NetHadessPowerProfiles {
     async fn performance_inhibited(&self) -> &str { self.0.performance_inhibited().await }
 
     #[dbus_interface(property)]
-    async fn profiles(&self) -> Vec<HashMap<&'static str, zvariant::Value>> {
+    async fn profiles(&self) -> Vec<HashMap<&'static str, zvariant::Value<'_>>> {
         self.0.profiles().await
     }
 

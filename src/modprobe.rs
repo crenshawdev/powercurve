@@ -14,7 +14,7 @@ pub fn unload(module: &str) -> io::Result<()> {
         if stat.success() {
             Ok(())
         } else {
-            Err(io::Error::new(io::ErrorKind::Other, format!("failed to unload {}", module)))
+            Err(io::Error::other(format!("failed to unload {}", module)))
         }
     })
 }
@@ -25,7 +25,7 @@ pub fn load(module: &str, options: &[&str]) -> io::Result<()> {
         if stat.success() {
             Ok(())
         } else {
-            Err(io::Error::new(io::ErrorKind::Other, format!("failed to load {}", module)))
+            Err(io::Error::other(format!("failed to load {}", module)))
         }
     })
 }
