@@ -1,7 +1,7 @@
 pkgname=vintagetechie-power-git
 pkgver=1.2.9.r469.865486c
 pkgrel=1
-pkgdesc="Desktop power management with per-channel fan control for Thelio systems"
+pkgdesc="Lightweight desktop power management daemon with configurable fan curves"
 arch=('x86_64' 'aarch64')
 url="https://codeberg.org/VintageTechie/vintagetechie-power"
 license=('GPL-3.0-or-later')
@@ -19,7 +19,7 @@ sha256sums=('SKIP')
 pkgver() {
   cd "vintagetechie-power"
   local _ver
-  _ver=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+  _ver=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/' | tr '-' '.')
   printf "%s.r%s.%s" "$_ver" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
