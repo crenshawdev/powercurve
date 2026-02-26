@@ -182,6 +182,7 @@ fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
 }
 
 /// Check that the platform hwmon and relevant temp sources exist on this machine.
+/// Skipped in tests since hwmon availability depends on the running machine.
 fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
     let hwmons = match HwMon::all() {
         Ok(h) => h,
@@ -222,5 +223,156 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
         issues.push(Issue::warning(
             "channels reference gpu temps but no amdgpu hwmon found (NVIDIA uses NVML at runtime)".to_string(),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fan::{ChannelConfig, CurvePoint, FanConfig, ProfileConfig};
+    use std::collections::HashMap;
+
+    /// Build a minimal valid config for testing.
+    fn valid_config() -> FanConfig {
+        FanConfig {
+            platform:          None,
+            critical_cpu_temp: 80.0,
+            critical_gpu_temp: 75.0,
+            hysteresis:        None,
+            thermal_fallback:  None,
+            thermal_cooldown:  None,
+            curve:             vec![
+                CurvePoint { temp: 30.0, duty: 10.0 },
+                CurvePoint { temp: 50.0, duty: 50.0 },
+                CurvePoint { temp: 75.0, duty: 100.0 },
+            ],
+            channels:          vec![
+                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), curve: None },
+            ],
+            profiles:          None,
+        }
+    }
+
+    /// Filter issues to just errors or just warnings.
+    fn errors(issues: &[Issue]) -> Vec<&str> {
+        issues.iter()
+            .filter(|i| i.severity == Severity::Error)
+            .map(|i| i.message.as_str())
+            .collect()
+    }
+
+    fn warnings(issues: &[Issue]) -> Vec<&str> {
+        issues.iter()
+            .filter(|i| i.severity == Severity::Warning)
+            .map(|i| i.message.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn valid_config_no_issues() {
+        let config = valid_config();
+        let mut issues = Vec::new();
+        validate_curve(&config.curve, "shared", &mut issues);
+        validate_critical_temps(&config, &mut issues);
+        validate_channels(&config, &mut issues);
+        validate_profiles(&config, &mut issues);
+        assert!(errors(&issues).is_empty());
+        assert!(warnings(&issues).is_empty());
+    }
+
+    #[test]
+    fn curve_not_monotonic() {
+        let mut config = valid_config();
+        config.curve = vec![
+            CurvePoint { temp: 50.0, duty: 50.0 },
+            CurvePoint { temp: 30.0, duty: 10.0 },
+        ];
+        let mut issues = Vec::new();
+        validate_curve(&config.curve, "shared", &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("not greater than previous"));
+    }
+
+    #[test]
+    fn duty_out_of_range() {
+        let mut config = valid_config();
+        config.curve = vec![
+            CurvePoint { temp: 30.0, duty: -5.0 },
+            CurvePoint { temp: 50.0, duty: 110.0 },
+        ];
+        let mut issues = Vec::new();
+        validate_curve(&config.curve, "shared", &mut issues);
+        assert_eq!(errors(&issues).len(), 2);
+    }
+
+    #[test]
+    fn critical_temp_out_of_range() {
+        let mut config = valid_config();
+        config.critical_cpu_temp = 150.0;
+        config.critical_gpu_temp = -10.0;
+        let mut issues = Vec::new();
+        validate_critical_temps(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 2);
+    }
+
+    #[test]
+    fn unknown_profile_name() {
+        let mut config = valid_config();
+        let mut profiles = HashMap::new();
+        profiles.insert("turbo".into(), ProfileConfig {
+            curve: vec![CurvePoint { temp: 30.0, duty: 80.0 }],
+        });
+        config.profiles = Some(profiles);
+        let mut issues = Vec::new();
+        validate_profiles(&config, &mut issues);
+        assert_eq!(warnings(&issues).len(), 1);
+        assert!(warnings(&issues)[0].contains("unknown profile name"));
+    }
+
+    #[test]
+    fn thermal_cooldown_out_of_range() {
+        let mut config = valid_config();
+        config.thermal_cooldown = Some(0);
+        let mut issues = Vec::new();
+        validate_critical_temps(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("thermal_cooldown"));
+
+        config.thermal_cooldown = Some(500);
+        issues.clear();
+        validate_critical_temps(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+    }
+
+    #[test]
+    fn hysteresis_out_of_range() {
+        let mut config = valid_config();
+        config.hysteresis = Some(25.0);
+        let mut issues = Vec::new();
+        validate_critical_temps(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("hysteresis"));
+    }
+
+    #[test]
+    fn no_channels_is_error() {
+        let mut config = valid_config();
+        config.channels.clear();
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("no channels"));
+    }
+
+    #[test]
+    fn unknown_source_is_warning() {
+        let mut config = valid_config();
+        config.channels = vec![
+            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), curve: None },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert_eq!(warnings(&issues).len(), 1);
+        assert!(warnings(&issues)[0].contains("unknown source"));
     }
 }

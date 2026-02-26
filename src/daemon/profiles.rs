@@ -4,18 +4,12 @@
 
 use super::pci_runtime_pm_support;
 use crate::{
-    errors::{ModelError, PciDeviceError, ProfileError, ScsiHostError},
+    errors::{PciDeviceError, ProfileError, ScsiHostError},
     kernel_parameters::{DeviceList, Dirty},
     radeon::RadeonDevice,
     Profile,
 };
 use intel_pstate::{PState, PStateError, PStateValues};
-use std::{
-    fs,
-    io::{Read, Seek, SeekFrom, Write},
-    path::Path,
-    process::Command,
-};
 use sysfs_class::{PciDevice, RuntimePM, RuntimePowerManagement, ScsiHost, SysClass};
 
 /// Instead of returning on the first error, we want to collect all errors that occur while
@@ -61,9 +55,6 @@ pub fn balanced(errors: &mut Vec<ProfileError>) {
         )
     );
 
-    if let Some(model_profiles) = ModelProfiles::new() {
-        catch!(errors, model_profiles.balanced.set());
-    }
 }
 
 /// Sets parameters for the performance profile.
@@ -91,16 +82,13 @@ pub fn performance(errors: &mut Vec<ProfileError>) {
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::Off));
     }
 
-    if let Some(model_profiles) = ModelProfiles::new() {
-        catch!(errors, model_profiles.performance.set());
-    }
 }
 
 /// Sets parameters for the quiet profile. Reduces CPU clocks and enables
 /// aggressive power management for a quieter, cooler desktop.
 pub fn quiet(errors: &mut Vec<ProfileError>) {
     if crate::acpi_platform::supported() {
-        crate::acpi_platform::battery();
+        crate::acpi_platform::quiet();
     }
 
     Dirty::default().set_max_lost_work(15);
@@ -117,9 +105,6 @@ pub fn quiet(errors: &mut Vec<ProfileError>) {
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::On));
     }
 
-    if let Some(model_profiles) = ModelProfiles::new() {
-        catch!(errors, model_profiles.quiet.set());
-    }
 }
 
 /// Controls the Intel [`PState`] values.
@@ -164,80 +149,4 @@ fn scsi_host_link_time_pm_policy(policies: &'static [&'static str]) -> Result<()
     }
 
     Ok(())
-}
-
-/// Per-model power limit and thermal tuning. Keeps the framework for adding
-/// desktop-specific profiles later.
-pub struct ModelProfile {
-    pl1:        Option<u8>,
-    pl2:        Option<u8>,
-    tcc_offset: Option<u8>,
-}
-
-impl ModelProfile {
-    pub fn set(&self) -> Result<(), ModelError> {
-        // Thermald sets pl1 and pl2 on its own, conflicting with us
-        let _status = Command::new("systemctl")
-            .arg("stop")
-            .arg("thermald.service")
-            .status()
-            .map_err(ModelError::Thermald)?;
-
-        if let Some(pl1) = self.pl1 {
-            fs::write(
-                "/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw",
-                format!("{}", u64::from(pl1) * 1_000_000),
-            )
-            .map_err(ModelError::Pl1)?;
-        }
-
-        if let Some(pl2) = self.pl2 {
-            fs::write(
-                "/sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw",
-                format!("{}", u64::from(pl2) * 1_000_000),
-            )
-            .map_err(ModelError::Pl2)?;
-        }
-
-        if let Some(tcc_offset) = self.tcc_offset {
-            let path = Path::new("/dev/cpu/0/msr");
-            if !path.is_file() {
-                let status =
-                    Command::new("modprobe").arg("msr").status().map_err(ModelError::ModprobeIo)?;
-                if !status.success() {
-                    return Err(ModelError::ModprobeExitStatus(status));
-                }
-            }
-
-            let mut file = fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(path)
-                .map_err(ModelError::MsrOpen)?;
-            file.seek(SeekFrom::Start(0x1A2)).map_err(ModelError::MsrSeek)?;
-            let mut data = [0; 8];
-            file.read_exact(&mut data).map_err(ModelError::MsrRead)?;
-            data[3] = tcc_offset;
-            file.write_all(&data).map_err(ModelError::MsrWrite)?;
-        }
-
-        Ok(())
-    }
-}
-
-pub struct ModelProfiles {
-    pub balanced:    ModelProfile,
-    pub performance: ModelProfile,
-    pub quiet:       ModelProfile,
-}
-
-impl ModelProfiles {
-    /// Returns model-specific power profiles if the running hardware has a
-    /// known configuration. Currently empty, ready for desktop entries.
-    pub fn new() -> Option<Self> {
-        let _model_line =
-            fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
-        // Add desktop model entries here as needed.
-        None
-    }
 }

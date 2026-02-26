@@ -14,13 +14,10 @@ pub mod fan_detect;
 pub mod graphics;
 pub mod kernel_parameters;
 pub mod logging;
-pub mod modprobe;
 pub mod monitor;
-pub mod module;
 pub mod nvml;
 pub mod pci;
 pub mod radeon;
-pub mod snd;
 pub mod state;
 pub mod util;
 

@@ -29,7 +29,7 @@ pub fn choices() -> impl Iterator<Item = &'static str> {
 pub fn supported() -> bool { Path::new(SYSFS_PATH).exists() }
 
 /// Applies the `low-power` or `quiet` ACPI platform profile.
-pub fn battery() {
+pub fn quiet() {
     let mut first_choice = None;
 
     for choice in choices() {
