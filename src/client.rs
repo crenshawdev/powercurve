@@ -42,7 +42,9 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
             _ => profile(&mut client).await.context("failed to get power profile"),
         },
         Args::Status => status(&mut client).await.context("failed to get daemon status"),
-        Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config => unreachable!(),
+        Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config | Args::Monitor => {
+            unreachable!()
+        }
     }
 }
 

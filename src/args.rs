@@ -74,4 +74,10 @@ pub enum Args {
                       Connects to the running daemon via D-Bus. Does not require root"
     )]
     Status,
+    #[clap(
+        about = "Monitor profile and thermal events with desktop notifications",
+        long_about = "Long-lived process that listens for PowerProfileSwitch and ThermalEvent \
+                      signals from the daemon and sends desktop notifications. Does not require root"
+    )]
+    Monitor,
 }

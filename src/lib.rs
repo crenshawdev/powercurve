@@ -15,6 +15,7 @@ pub mod graphics;
 pub mod kernel_parameters;
 pub mod logging;
 pub mod modprobe;
+pub mod monitor;
 pub mod module;
 pub mod nvml;
 pub mod pci;

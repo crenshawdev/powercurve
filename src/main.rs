@@ -7,7 +7,7 @@
 use clap::Parser;
 use log::LevelFilter;
 use std::process;
-use powercurve::{args::Args, client, config_check, daemon, fan_detect, logging};
+use powercurve::{args::Args, client, config_check, daemon, fan_detect, logging, monitor};
 
 fn main() {
     let args = Args::parse();
@@ -33,6 +33,7 @@ fn main() {
         }
         Args::FanDetect { generate } => fan_detect::run(generate),
         Args::Config => config_check::run(),
+        Args::Monitor => monitor::run(),
         _ => client::client(&args),
     };
 
