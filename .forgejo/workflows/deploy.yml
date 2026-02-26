@@ -23,7 +23,7 @@ jobs:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          pkg=$(ls powercurve-git-*-x86_64.pkg.tar.zst | head -1)
+          pkg="$(pwd)/$(ls powercurve-git-*-x86_64.pkg.tar.zst | head -1)"
 
           rm -rf /tmp/repo
           git clone --branch pages \
@@ -35,9 +35,9 @@ jobs:
           cd /tmp/repo/x86_64
           repo-remove vintagetechie-arch-repo.db.tar.gz vintagetechie-power-git 2>/dev/null || true
 
-          rm -f /tmp/repo/x86_64/powercurve-git-*.pkg.tar.zst
-          cp "$pkg" /tmp/repo/x86_64/
-          repo-add vintagetechie-arch-repo.db.tar.gz "$pkg"
+          rm -f powercurve-git-*.pkg.tar.zst
+          cp "$pkg" .
+          repo-add vintagetechie-arch-repo.db.tar.gz "$(basename "$pkg")"
 
           cd /tmp/repo
           git config user.name "VintageTechie"
