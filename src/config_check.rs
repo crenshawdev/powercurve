@@ -160,6 +160,21 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             let label = format!("channel {} ({})", i, ch.pwm);
             validate_curve(curve, &label, issues);
         }
+
+        if let Some(ref profiles) = ch.profiles {
+            let valid_names = ["quiet", "balanced", "performance"];
+            for (name, profile) in profiles {
+                if !valid_names.contains(&name.to_lowercase().as_str()) {
+                    issues.push(Issue::warning(format!(
+                        "channel {} ({}) profile '{}': unknown profile name",
+                        i, ch.pwm, name,
+                    )));
+                }
+
+                let label = format!("channel {} ({}) profile '{}'", i, ch.pwm, name);
+                validate_curve(&profile.curve, &label, issues);
+            }
+        }
     }
 }
 
@@ -229,7 +244,7 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fan::{ChannelConfig, CurvePoint, FanConfig, ProfileConfig};
+    use crate::fan::{ChannelConfig, ChannelProfileConfig, CurvePoint, FanConfig, ProfileConfig};
     use std::collections::HashMap;
 
     /// Build a minimal valid config for testing.
@@ -247,7 +262,7 @@ mod tests {
                 CurvePoint { temp: 75.0, duty: 100.0 },
             ],
             channels:          vec![
-                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), curve: None },
+                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), curve: None, profiles: None },
             ],
             profiles:          None,
         }
@@ -368,11 +383,56 @@ mod tests {
     fn unknown_source_is_warning() {
         let mut config = valid_config();
         config.channels = vec![
-            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), curve: None },
+            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), curve: None, profiles: None },
         ];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(warnings(&issues).len(), 1);
         assert!(warnings(&issues)[0].contains("unknown source"));
+    }
+
+    #[test]
+    fn channel_profile_unknown_name_is_warning() {
+        let mut config = valid_config();
+        let mut profiles = HashMap::new();
+        profiles.insert("turbo".into(), ChannelProfileConfig {
+            curve: vec![CurvePoint { temp: 30.0, duty: 10.0 }],
+        });
+        config.channels = vec![
+            ChannelConfig {
+                pwm: "pwm1".into(),
+                source: "cpu".into(),
+                curve: None,
+                profiles: Some(profiles),
+            },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert_eq!(warnings(&issues).len(), 1);
+        assert!(warnings(&issues)[0].contains("unknown profile name"));
+    }
+
+    #[test]
+    fn channel_profile_bad_curve_is_error() {
+        let mut config = valid_config();
+        let mut profiles = HashMap::new();
+        profiles.insert("quiet".into(), ChannelProfileConfig {
+            curve: vec![
+                CurvePoint { temp: 50.0, duty: 50.0 },
+                CurvePoint { temp: 30.0, duty: 10.0 },
+            ],
+        });
+        config.channels = vec![
+            ChannelConfig {
+                pwm: "pwm1".into(),
+                source: "cpu".into(),
+                curve: None,
+                profiles: Some(profiles),
+            },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("not greater than previous"));
     }
 }

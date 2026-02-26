@@ -44,12 +44,20 @@ pub(crate) struct CurvePoint {
     pub duty: f32,
 }
 
-/// Maps a PWM output to a temperature source, with an optional per-channel curve.
+/// Per-profile curve override on a single channel.
+#[derive(Deserialize)]
+pub(crate) struct ChannelProfileConfig {
+    pub curve: Vec<CurvePoint>,
+}
+
+/// Maps a PWM output to a temperature source, with optional per-channel
+/// and per-channel-per-profile curve overrides.
 #[derive(Deserialize)]
 pub(crate) struct ChannelConfig {
-    pub pwm:    String,
-    pub source: String,
-    pub curve:  Option<Vec<CurvePoint>>,
+    pub pwm:      String,
+    pub source:   String,
+    pub curve:    Option<Vec<CurvePoint>>,
+    pub profiles: Option<HashMap<String, ChannelProfileConfig>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,6 +96,7 @@ struct ChannelDef {
     pwm:            String,
     source:         TempSource,
     override_curve: Option<FanCurve>,
+    profile_curves: HashMap<String, FanCurve>,
 }
 
 /// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
@@ -172,10 +181,18 @@ impl FanDaemon {
             self.channel_defs = config
                 .channels
                 .iter()
-                .map(|ch| ChannelDef {
-                    pwm:            ch.pwm.clone(),
-                    source:         parse_temp_source(&ch.source),
-                    override_curve: ch.curve.as_deref().map(build_curve),
+                .map(|ch| {
+                    let profile_curves = ch.profiles.as_ref()
+                        .map(|p| p.iter()
+                            .map(|(name, pc)| (name.to_lowercase(), build_curve(&pc.curve)))
+                            .collect())
+                        .unwrap_or_default();
+                    ChannelDef {
+                        pwm:            ch.pwm.clone(),
+                        source:         parse_temp_source(&ch.source),
+                        override_curve: ch.curve.as_deref().map(build_curve),
+                        profile_curves,
+                    }
                 })
                 .collect();
 
@@ -278,19 +295,21 @@ impl FanDaemon {
     /// Switch the active power profile, rebuilding channel curves.
     ///
     /// Resolution order per channel (most specific wins):
-    /// 1. Per-channel curve override from config
-    /// 2. Profile-specific curve (if one exists for this profile)
-    /// 3. Shared top-level curve
+    /// 1. Per-channel per-profile curve (this channel + this profile)
+    /// 2. Per-channel default curve (this channel, any profile)
+    /// 3. Per-profile global curve (any channel, this profile)
+    /// 4. Shared top-level curve (fallback)
     pub fn set_profile(&mut self, profile: &str) {
         self.current_profile = profile.to_lowercase();
-        let base_curve = self.profile_curves.get(&self.current_profile)
+        let global_curve = self.profile_curves.get(&self.current_profile)
             .unwrap_or(&self.shared_curve);
 
         for (i, def) in self.channel_defs.iter().enumerate() {
-            if def.override_curve.is_none() {
-                if let Some(ch) = self.channels.get_mut(i) {
-                    ch.curve = base_curve.clone();
-                }
+            if let Some(ch) = self.channels.get_mut(i) {
+                ch.curve = def.profile_curves.get(&self.current_profile)
+                    .or(def.override_curve.as_ref())
+                    .unwrap_or(global_curve)
+                    .clone();
             }
         }
 
@@ -892,6 +911,88 @@ mod tests {
         let temp_46c = 46_000u32;
         let drop = temp_50c.saturating_sub(temp_46c);
         assert!(drop >= hysteresis, "4C drop should exceed 3C hysteresis band");
+    }
+
+    #[test]
+    fn config_per_channel_profile_curves() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 35.0
+            duty = 10
+
+            [[curve]]
+            temp = 70.0
+            duty = 100
+
+            [profiles.quiet]
+            curve = [
+                { temp = 40.0, duty = 5 },
+                { temp = 80.0, duty = 60 },
+            ]
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+
+            [[channels]]
+            pwm = "pwm3"
+            source = "gpu"
+
+            # Default per-channel curve for pwm3
+            [[channels.curve]]
+            temp = 30.0
+            duty = 5
+
+            [[channels.curve]]
+            temp = 80.0
+            duty = 100
+
+            # Per-channel per-profile curves for pwm3
+            [channels.profiles.quiet]
+            curve = [
+                { temp = 30.0, duty = 3 },
+                { temp = 80.0, duty = 80 },
+            ]
+
+            [channels.profiles.performance]
+            curve = [
+                { temp = 30.0, duty = 10 },
+                { temp = 70.0, duty = 100 },
+            ]
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+
+        // pwm1 has no per-channel anything
+        assert!(config.channels[0].curve.is_none());
+        assert!(config.channels[0].profiles.is_none());
+
+        // pwm3 has a per-channel curve and per-channel profile curves
+        assert!(config.channels[1].curve.is_some());
+        let ch_profiles = config.channels[1].profiles.as_ref().unwrap();
+        assert_eq!(ch_profiles.len(), 2);
+        assert!(ch_profiles.contains_key("quiet"));
+        assert!(ch_profiles.contains_key("performance"));
+
+        // Verify the curves are distinct
+        let shared = build_curve(&config.curve);
+        let ch_default = build_curve(config.channels[1].curve.as_ref().unwrap());
+        let ch_quiet = build_curve(&ch_profiles["quiet"].curve);
+        let ch_perf = build_curve(&ch_profiles["performance"].curve);
+
+        // At 50C, all four curves should yield different duties
+        let shared_50 = shared.get_duty(50_00).unwrap();
+        let ch_default_50 = ch_default.get_duty(50_00).unwrap();
+        let ch_quiet_50 = ch_quiet.get_duty(50_00).unwrap();
+        let ch_perf_50 = ch_perf.get_duty(50_00).unwrap();
+
+        assert_ne!(shared_50, ch_default_50);
+        assert_ne!(ch_default_50, ch_quiet_50);
+        assert!(ch_quiet_50 < ch_default_50, "quiet should be lower duty than default");
+        assert!(ch_perf_50 > ch_default_50, "performance should be higher duty than default");
     }
 
     #[test]
