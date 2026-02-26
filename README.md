@@ -14,6 +14,12 @@ that lets you tune each fan independently per profile. The daemon
 interpolates between curve points, applies hysteresis to prevent
 flapping, and handles thermal emergencies when temps get critical.
 
+**Desktop only.** This is built for desktops and workstations. Most
+laptops manage fans through embedded controllers that don't expose
+PWM via hwmon, so fan control won't work. The power profile side
+functions fine on any hardware, but if fan curves are what you're
+after, stick with `power-profiles-daemon` on laptops.
+
 ## Installation
 
 ### Arch
