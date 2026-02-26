@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  purge)
+    rm -rf /etc/powercurve
+    rm -rf /var/lib/powercurve
+    ;;
+  remove)
+    systemctl daemon-reload
+    ;;
+esac

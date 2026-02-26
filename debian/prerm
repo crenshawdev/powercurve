@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  remove|deconfigure)
+    systemctl stop com.vintagetechie.PowerCurve.service || true
+    systemctl disable com.vintagetechie.PowerCurve.service || true
+    ;;
+esac

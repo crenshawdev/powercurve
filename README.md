@@ -11,14 +11,25 @@ that talk to the `org.freedesktop.UPower.PowerProfiles` D-Bus interface
 
 ## Installation
 
+### Arch
+
 Available from the [VintageTechie Arch repo](https://vintagetechie.codeberg.page/vintagetechie-arch-repo/):
 
 ```
 sudo pacman -S powercurve-git
 ```
 
-The package provides and conflicts with `power-profiles-daemon`, so
-it replaces the stock daemon cleanly.
+### Debian / Ubuntu / Pop!_OS
+
+Download the latest `.deb` from the
+[releases page](https://codeberg.org/VintageTechie/powercurve/releases):
+
+```
+sudo apt install ./powercurve_*.deb
+```
+
+Both packages provide and conflict with `power-profiles-daemon`, so
+the stock daemon gets replaced cleanly.
 
 ## Power profiles
 
@@ -166,6 +177,11 @@ The daemon runs as a systemd service:
 ```
 sudo systemctl enable --now com.vintagetechie.PowerCurve
 ```
+
+## Rollback
+
+See [ROLLBACK.md](ROLLBACK.md) for instructions on switching back to
+power-profiles-daemon or downgrading to a previous version.
 
 ## License
 

@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  configure)
+    systemctl daemon-reload
+
+    # Generate a fan config tailored to this machine's hardware.
+    config="/etc/powercurve/fan.toml"
+    if [ ! -f "$config" ]; then
+      mkdir -p /etc/powercurve
+      powercurve fan-detect --generate > "$config" 2>/dev/null || true
+    fi
+
+    systemctl enable com.vintagetechie.PowerCurve.service || true
+    systemctl start com.vintagetechie.PowerCurve.service || true
+    ;;
+esac

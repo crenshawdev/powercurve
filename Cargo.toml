@@ -1,6 +1,6 @@
 [package]
 name = "powercurve"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 authors = ["John Crenshaw"]
 edition = "2021"
 rust-version = "1.93.0"
@@ -37,3 +37,16 @@ env_logger = "0.11"
 match_like_matches_macro = "allow"
 missing_safety_doc = "allow"
 single_match = "allow"
+
+[package.metadata.deb]
+license-file = "LICENSE"
+depends = "dbus"
+provides = "power-profiles-daemon"
+conflicts = "power-profiles-daemon"
+maintainer-scripts = "debian/"
+assets = [
+    ["target/release/powercurve", "usr/bin/", "755"],
+    ["data/com.vintagetechie.PowerCurve.conf", "usr/share/dbus-1/system.d/", "644"],
+    ["data/com.vintagetechie.PowerCurve.xml", "usr/share/dbus-1/interfaces/", "644"],
+    ["data/com.vintagetechie.PowerCurve.service", "usr/lib/systemd/system/", "644"],
+]
