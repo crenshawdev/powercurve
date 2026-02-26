@@ -9,8 +9,8 @@ SRC = Cargo.toml Cargo.lock Makefile $(shell find src -type f -wholename '*src/*
 
 .PHONY: all clean distclean install uninstall update
 
-BIN=vintagetechie-power
-ID=com.vintagetechie.PowerDaemon
+BIN=powercurve
+ID=com.vintagetechie.PowerCurve
 
 DEBUG ?= 0
 ifeq ($(DEBUG),0)

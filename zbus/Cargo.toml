@@ -1,5 +1,5 @@
 [package]
-name = "vintagetechie-power-zbus"
+name = "powercurve-zbus"
 version = "2.0.0"
 edition = "2021"
 

@@ -7,7 +7,7 @@
 use clap::Parser;
 use log::LevelFilter;
 use std::process;
-use vintagetechie_power::{args::Args, client, daemon, fan_detect, logging};
+use powercurve::{args::Args, client, daemon, fan_detect, logging};
 
 fn main() {
     let args = Args::parse();

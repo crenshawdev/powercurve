@@ -22,9 +22,9 @@ pub mod snd;
 pub mod state;
 pub mod util;
 
-pub static DBUS_NAME: &str = "com.vintagetechie.PowerDaemon";
-pub static DBUS_PATH: &str = "/com/vintagetechie/PowerDaemon";
-pub static DBUS_IFACE: &str = "com.vintagetechie.PowerDaemon";
+pub static DBUS_NAME: &str = "com.vintagetechie.PowerCurve";
+pub static DBUS_PATH: &str = "/com/vintagetechie/PowerCurve";
+pub static DBUS_IFACE: &str = "com.vintagetechie.PowerCurve";
 
 #[derive(Copy, Clone, Debug)]
 pub enum Profile {

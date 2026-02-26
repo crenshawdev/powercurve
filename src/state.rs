@@ -5,8 +5,8 @@
 use std::fs;
 use std::path::Path;
 
-const STATE_DIR: &str = "/var/lib/vintagetechie-power";
-const STATE_FILE: &str = "/var/lib/vintagetechie-power/profile";
+const STATE_DIR: &str = "/var/lib/powercurve";
+const STATE_FILE: &str = "/var/lib/powercurve/profile";
 
 const VALID_PROFILES: &[&str] = &["Quiet", "Balanced", "Performance"];
 

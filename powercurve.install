@@ -2,16 +2,16 @@ post_install() {
   systemctl daemon-reload
 
   # Generate a fan config tailored to this machine's hardware.
-  local config="/etc/vintagetechie-power/fan.toml"
+  local config="/etc/powercurve/fan.toml"
   if [ ! -f "$config" ]; then
-    mkdir -p /etc/vintagetechie-power
-    vintagetechie-power fan-detect --generate > "$config" 2>/dev/null || true
+    mkdir -p /etc/powercurve
+    powercurve fan-detect --generate > "$config" 2>/dev/null || true
   fi
 }
 
 post_upgrade() {
   systemctl daemon-reload
-  systemctl try-restart com.vintagetechie.PowerDaemon.service
+  systemctl try-restart com.vintagetechie.PowerCurve.service
 }
 
 post_remove() {

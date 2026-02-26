@@ -6,7 +6,7 @@ use clap::{builder::PossibleValuesParser, Parser};
 
 #[derive(Parser)]
 #[clap(
-    name = "vintagetechie-power",
+    name = "powercurve",
     about = "Desktop power management daemon",
     version = env!("CARGO_PKG_VERSION"),
     subcommand_required = true,

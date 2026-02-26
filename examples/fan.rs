@@ -1,6 +1,6 @@
 use log::LevelFilter;
 use std::{process, thread, time};
-use vintagetechie_power::{
+use powercurve::{
     fan::{FanDaemon, FanDaemonError},
     logging,
     nvml::NvidiaState,

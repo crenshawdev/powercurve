@@ -1,0 +1,12 @@
+[Unit]
+Description=PowerCurve Daemon
+
+[Service]
+ExecStart=/usr/bin/powercurve daemon
+Restart=on-failure
+Type=dbus
+BusName=com.vintagetechie.PowerCurve
+
+[Install]
+WantedBy=multi-user.target
+Alias=powercurve.service

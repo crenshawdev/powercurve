@@ -992,6 +992,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "powercurve"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "concat-in-place",
+ "env_logger",
+ "fern",
+ "futures-lite 2.6.1",
+ "intel-pstate",
+ "libc",
+ "log",
+ "once_cell",
+ "powercurve-zbus",
+ "serde",
+ "sysfs-class",
+ "thiserror",
+ "tokio",
+ "toml",
+ "zbus",
+ "zvariant",
+]
+
+[[package]]
+name = "powercurve-zbus"
+version = "2.0.0"
+dependencies = [
+ "zbus",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1496,37 +1527,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vintagetechie-power"
-version = "0.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "clap",
- "concat-in-place",
- "env_logger",
- "fern",
- "futures-lite 2.6.1",
- "intel-pstate",
- "libc",
- "log",
- "once_cell",
- "serde",
- "sysfs-class",
- "thiserror",
- "tokio",
- "toml",
- "vintagetechie-power-zbus",
- "zbus",
- "zvariant",
-]
-
-[[package]]
-name = "vintagetechie-power-zbus"
-version = "2.0.0"
-dependencies = [
- "zbus",
-]
 
 [[package]]
 name = "waker-fn"
