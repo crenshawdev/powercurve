@@ -7,7 +7,7 @@
 use clap::Parser;
 use log::LevelFilter;
 use std::process;
-use vintagetechie_power::{args::Args, client, daemon, logging};
+use vintagetechie_power::{args::Args, client, daemon, fan_detect, logging};
 
 fn main() {
     let args = Args::parse();
@@ -31,6 +31,7 @@ fn main() {
                 Err(anyhow::anyhow!("must be run as root"))
             }
         }
+        Args::FanDetect { generate } => fan_detect::run(generate),
         _ => client::client(&args),
     };
 

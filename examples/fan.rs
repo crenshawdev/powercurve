@@ -3,10 +3,11 @@ use std::{process, thread, time};
 use vintagetechie_power::{
     fan::{FanDaemon, FanDaemonError},
     logging,
+    nvml::NvidiaState,
 };
 
 fn inner() -> Result<(), FanDaemonError> {
-    let mut daemon = FanDaemon::new(false);
+    let mut daemon = FanDaemon::new(NvidiaState::Absent);
 
     loop {
         daemon.step();

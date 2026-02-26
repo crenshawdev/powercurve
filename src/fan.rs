@@ -4,27 +4,19 @@
 
 #![allow(clippy::inconsistent_digit_grouping)]
 
+use crate::nvml::NvidiaState;
 use serde::Deserialize;
-use std::{
-    cell::Cell,
-    cmp, fs, io,
-    process::{Command, Stdio},
-};
+use std::{cmp, fs, io};
 use sysfs_class::{HwMon, SysClass};
 
 const CONFIG_PATH: &str = "/etc/vintagetechie-power/fan.toml";
-
-/// Default CPU critical threshold when no config file exists. 79C in millidegrees.
-const DEFAULT_CRITICAL_CPU_TEMP: u32 = 79_000;
-
-/// Default GPU critical threshold when no config file exists. 75C in millidegrees.
-const DEFAULT_CRITICAL_GPU_TEMP: u32 = 75_000;
 
 // -- TOML config deserialization types --
 
 /// Top-level config file structure.
 #[derive(Deserialize)]
 struct FanConfig {
+    platform:          Option<String>,
     critical_cpu_temp: f32,
     critical_gpu_temp: f32,
     curve:             Vec<CurvePoint>,
@@ -40,11 +32,12 @@ struct CurvePoint {
     duty: f32,
 }
 
-/// Maps a PWM output to a temperature source.
+/// Maps a PWM output to a temperature source, with an optional per-channel curve.
 #[derive(Deserialize)]
 struct ChannelConfig {
     pwm:    String,
     source: String,
+    curve:  Option<Vec<CurvePoint>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -62,7 +55,7 @@ pub enum FanDaemonError {
 pub enum TempSource {
     /// Max of CPU hwmon sensors only.
     Cpu,
-    /// Max of GPU sensors (amdgpu hwmon + nvidia-smi).
+    /// Max of GPU sensors (amdgpu hwmon + NVML).
     Gpu,
     /// Max of all sensors, CPU and GPU combined.
     All,
@@ -80,52 +73,69 @@ pub struct FanDaemon {
     channels:          Vec<FanChannel>,
     critical_cpu_temp: u32,
     critical_gpu_temp: u32,
+    platform_names:    Vec<String>,
     amdgpus:           Vec<HwMon>,
     platforms:         Vec<HwMon>,
     cpus:              Vec<HwMon>,
-    nvidia_exists:     bool,
-    displayed_warning: Cell<bool>,
+    nvidia:            NvidiaState,
 }
 
 impl FanDaemon {
     /// Build a new fan daemon with per-channel temperature routing.
     ///
-    /// Tries to load config from `/etc/vintagetechie-power/fan.toml` first.
-    /// Falls back to hardcoded defaults based on DMI product version
-    /// if the config file is missing or malformed.
-    pub fn new(nvidia_exists: bool) -> Self {
-        let (channels, critical_cpu_temp, critical_gpu_temp) =
-            if let Some(config) = load_config() {
-                let curve = build_curve(&config.curve);
+    /// Requires a config file at `/etc/vintagetechie-power/fan.toml`.
+    /// Without one, fan control is disabled and the daemon only handles
+    /// power profiles.
+    pub fn new(nvidia: NvidiaState) -> Self {
+        let config = load_config();
+
+        let (channels, critical_cpu_temp, critical_gpu_temp, platform_names) =
+            if let Some(config) = config {
+                let shared_curve = build_curve(&config.curve);
                 let channels = config
                     .channels
                     .into_iter()
-                    .map(|ch| FanChannel {
-                        pwm:    ch.pwm,
-                        source: parse_temp_source(&ch.source),
-                        curve:  curve.clone(),
+                    .map(|ch| {
+                        let curve = ch.curve.as_deref()
+                            .map(build_curve)
+                            .unwrap_or_else(|| shared_curve.clone());
+                        FanChannel {
+                            pwm:    ch.pwm,
+                            source: parse_temp_source(&ch.source),
+                            curve,
+                        }
                     })
                     .collect();
                 let cpu_crit = (config.critical_cpu_temp * 1000.0) as u32;
                 let gpu_crit = (config.critical_gpu_temp * 1000.0) as u32;
-                (channels, cpu_crit, gpu_crit)
+                let platform = config.platform
+                    .map(|name| vec![name])
+                    .unwrap_or_default();
+                (channels, cpu_crit, gpu_crit, platform)
             } else {
-                (default_channels(), DEFAULT_CRITICAL_CPU_TEMP, DEFAULT_CRITICAL_GPU_TEMP)
+                log::warn!(
+                    "no fan config found at {}, fan control disabled. \
+                     run `vintagetechie-power fan-detect --generate` to create one",
+                    CONFIG_PATH
+                );
+                (Vec::new(), 0, 0, Vec::new())
             };
 
         let mut daemon = Self {
             channels,
             critical_cpu_temp,
             critical_gpu_temp,
+            platform_names,
             amdgpus: Vec::new(),
             platforms: Vec::new(),
             cpus: Vec::new(),
-            nvidia_exists,
-            displayed_warning: Cell::new(false),
+            nvidia,
         };
 
-        if let Err(err) = daemon.discover() {
-            log::error!("fan daemon: {}", err);
+        if !daemon.platform_names.is_empty() {
+            if let Err(err) = daemon.discover() {
+                log::error!("fan daemon: {}", err);
+            }
         }
 
         daemon
@@ -143,9 +153,10 @@ impl FanDaemon {
 
                 match name.as_str() {
                     "amdgpu" => self.amdgpus.push(hwmon),
-                    "system76" => (),
-                    "system76_io" | "system76_thelio_io" => self.platforms.push(hwmon),
                     "apm_xgene" | "coretemp" | "k10temp" | "zenpower" => self.cpus.push(hwmon),
+                    n if self.platform_names.iter().any(|p| p == n) => {
+                        self.platforms.push(hwmon);
+                    }
                     _ => (),
                 }
             }
@@ -179,7 +190,7 @@ impl FanDaemon {
             })
     }
 
-    /// Max temperature across GPU sensors (amdgpu hwmon + nvidia-smi), in millidegrees Celsius.
+    /// Max temperature across GPU sensors (amdgpu hwmon + NVML), in millidegrees Celsius.
     fn get_gpu_temp(&self) -> Option<u32> {
         let mut temp_opt = self
             .amdgpus
@@ -196,22 +207,18 @@ impl FanDaemon {
                 }
             });
 
-        // nvidia-smi reports in whole Celsius, convert to millidegrees
-        // to match the hwmon convention used everywhere else.
-        if self.nvidia_exists && !self.displayed_warning.get() {
-            let mut nv_temp = 0;
-            match nvidia_temperatures(|temp| nv_temp = cmp::max(temp, nv_temp)) {
-                Ok(()) => {
-                    if nv_temp != 0 {
-                        let nv_temp_m = nv_temp * 1000;
-                        log::debug!("highest nvidia temp: {}", nv_temp_m);
-                        temp_opt =
-                            Some(temp_opt.map_or(nv_temp_m, |t| cmp::max(nv_temp_m, t)));
-                    }
-                }
-                Err(why) => {
-                    log::warn!("failed to get temperature of NVIDIA GPUs: {}", why);
-                    self.displayed_warning.set(true);
+        match self.nvidia {
+            NvidiaState::Absent => {}
+            NvidiaState::Unavailable => {
+                // NVIDIA hardware exists but we can't read its temp.
+                // Force GPU-sourced channels to max by reporting critical temp.
+                let safety = self.critical_gpu_temp;
+                temp_opt = Some(temp_opt.map_or(safety, |t| cmp::max(safety, t)));
+            }
+            NvidiaState::Active(ref nvml) => {
+                if let Some(nv_temp) = nvml.max_gpu_temp() {
+                    log::debug!("highest nvidia temp: {}", nv_temp);
+                    temp_opt = Some(temp_opt.map_or(nv_temp, |t| cmp::max(nv_temp, t)));
                 }
             }
         }
@@ -238,13 +245,17 @@ impl FanDaemon {
     }
 
     /// Set a single PWM channel's duty cycle (0-255), or restore auto mode on None.
+    ///
+    /// The enable file is derived from the channel name (e.g. "pwm2" -> "pwm2_enable")
+    /// so each channel controls its own hwmon output independently.
     fn set_channel_duty(&self, pwm: &str, duty_opt: Option<u8>) {
+        let enable_file = format!("{}_enable", pwm);
         for platform in &self.platforms {
             if let Some(duty) = duty_opt {
-                let _ = platform.write_file("pwm1_enable", "1");
+                let _ = platform.write_file(&enable_file, "1");
                 let _ = platform.write_file(pwm, format!("{}", duty));
             } else {
-                let _ = platform.write_file("pwm1_enable", "2");
+                let _ = platform.write_file(&enable_file, "2");
             }
         }
     }
@@ -254,6 +265,10 @@ impl FanDaemon {
     /// If any component crosses the critical threshold, all fans go to max
     /// duty regardless of their individual temperature source.
     pub fn step(&mut self) {
+        if self.platform_names.is_empty() {
+            return;
+        }
+
         if self.discover().is_ok() {
             let cpu_temp = self.get_cpu_temp();
             let gpu_temp = self.get_gpu_temp();
@@ -278,6 +293,9 @@ impl FanDaemon {
 
 impl Drop for FanDaemon {
     fn drop(&mut self) {
+        if self.platform_names.is_empty() {
+            return;
+        }
         for channel in &self.channels {
             self.set_channel_duty(&channel.pwm, None);
         }
@@ -322,44 +340,6 @@ fn parse_temp_source(s: &str) -> TempSource {
         "gpu" => TempSource::Gpu,
         _ => TempSource::All,
     }
-}
-
-/// Hardcoded channel layout used when no config file exists.
-/// Falls back to DMI model detection for curve selection.
-fn default_channels() -> Vec<FanChannel> {
-    let model = fs::read_to_string("/sys/class/dmi/id/product_version").unwrap_or_default();
-
-    match model.trim() {
-        "thelio-major-r1" => {
-            all_channels_uniform(FanCurve::threadripper2())
-        }
-        "thelio-astra-a1" | "thelio-astra-a1.1" | "thelio-major-r2"
-        | "thelio-major-r2.1" | "thelio-major-b1" | "thelio-major-b2"
-        | "thelio-major-b3" | "thelio-mega-r1" | "thelio-mega-r1.1" => {
-            all_channels_uniform(FanCurve::hedt())
-        }
-        "thelio-massive-b1" => {
-            all_channels_uniform(FanCurve::xeon())
-        }
-        _ => {
-            let curve = FanCurve::standard();
-            vec![
-                FanChannel { pwm: "pwm1".into(), source: TempSource::Cpu, curve: curve.clone() },
-                FanChannel { pwm: "pwm2".into(), source: TempSource::All, curve: curve.clone() },
-                FanChannel { pwm: "pwm3".into(), source: TempSource::Gpu, curve },
-            ]
-        }
-    }
-}
-
-/// Build an all-channels-same layout for models without per-component mapping.
-fn all_channels_uniform(curve: FanCurve) -> Vec<FanChannel> {
-    vec![
-        FanChannel { pwm: "pwm1".into(), source: TempSource::All, curve: curve.clone() },
-        FanChannel { pwm: "pwm2".into(), source: TempSource::All, curve: curve.clone() },
-        FanChannel { pwm: "pwm3".into(), source: TempSource::All, curve: curve.clone() },
-        FanChannel { pwm: "pwm4".into(), source: TempSource::All, curve },
-    ]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -436,46 +416,6 @@ impl FanCurve {
             .append(70_00, 100_00)
     }
 
-    /// Fan curve for threadripper 2
-    pub fn threadripper2() -> Self {
-        Self::default()
-            .append(00_00, 30_00)
-            .append(40_00, 40_00)
-            .append(47_50, 50_00)
-            .append(55_00, 65_00)
-            .append(62_50, 85_00)
-            .append(66_25, 100_00)
-    }
-
-    /// Fan curve for HEDT systems
-    pub fn hedt() -> Self {
-        Self::default()
-            .append(00_00, 30_00)
-            .append(50_00, 35_00)
-            .append(60_00, 45_00)
-            .append(70_00, 55_00)
-            .append(74_00, 60_00)
-            .append(76_00, 70_00)
-            .append(78_00, 80_00)
-            .append(81_00, 100_00)
-    }
-
-    /// Fan curve for xeon
-    pub fn xeon() -> Self {
-        Self::default()
-            .append(00_00, 40_00)
-            .append(50_00, 40_00)
-            .append(55_00, 45_00)
-            .append(60_00, 50_00)
-            .append(65_00, 55_00)
-            .append(70_00, 60_00)
-            .append(72_00, 65_00)
-            .append(74_00, 80_00)
-            .append(76_00, 85_00)
-            .append(77_00, 90_00)
-            .append(78_00, 100_00)
-    }
-
     pub fn get_duty(&self, temp: i16) -> Option<u16> {
         // Below the curve means fans off
         if let Some(first) = self.points.first() {
@@ -505,23 +445,6 @@ impl FanCurve {
         // If there are no points, return None
         None
     }
-}
-
-pub fn nvidia_temperatures<F: FnMut(u32)>(func: F) -> io::Result<()> {
-    let output = Command::new("nvidia-smi")
-        .arg("--query-gpu=temperature.gpu")
-        .arg("--format=csv,noheader")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .output()?;
-
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|_| io::Error::other("non-utf8 output"))?;
-
-    stdout.lines().filter_map(|line| line.parse::<u32>().ok()).for_each(func);
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -557,49 +480,91 @@ mod tests {
     }
 
     #[test]
-    fn hedt_points() {
-        let hedt = FanCurve::hedt();
+    fn config_with_platform() {
+        let toml_str = r#"
+            platform = "nct6775"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
 
-        assert_eq!(hedt.get_duty(0), Some(3000));
-        assert_eq!(hedt.get_duty(5000), Some(3500));
-        assert_eq!(hedt.get_duty(6000), Some(4500));
-        assert_eq!(hedt.get_duty(7000), Some(5500));
-        assert_eq!(hedt.get_duty(7400), Some(6000));
-        assert_eq!(hedt.get_duty(7600), Some(7000));
-        assert_eq!(hedt.get_duty(7800), Some(8000));
-        assert_eq!(hedt.get_duty(8100), Some(10000));
-        assert_eq!(hedt.get_duty(10000), Some(10000));
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.platform.as_deref(), Some("nct6775"));
     }
 
     #[test]
-    fn threadripper2_points() {
-        let threadripper2 = FanCurve::threadripper2();
+    fn config_without_platform() {
+        let toml_str = r#"
+            critical_cpu_temp = 79
+            critical_gpu_temp = 75
 
-        assert_eq!(threadripper2.get_duty(0), Some(3000));
-        assert_eq!(threadripper2.get_duty(4000), Some(4000));
-        assert_eq!(threadripper2.get_duty(4750), Some(5000));
-        assert_eq!(threadripper2.get_duty(5500), Some(6500));
-        assert_eq!(threadripper2.get_duty(6250), Some(8500));
-        assert_eq!(threadripper2.get_duty(6625), Some(10000));
-        assert_eq!(threadripper2.get_duty(10000), Some(10000));
+            [[curve]]
+            temp = 40.0
+            duty = 15
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.platform.is_none());
     }
 
     #[test]
-    fn xeon_points() {
-        let xeon = FanCurve::xeon();
+    fn config_per_channel_curve() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
 
-        assert_eq!(xeon.get_duty(0), Some(4000));
-        assert_eq!(xeon.get_duty(5000), Some(4000));
-        assert_eq!(xeon.get_duty(5500), Some(4500));
-        assert_eq!(xeon.get_duty(6000), Some(5000));
-        assert_eq!(xeon.get_duty(6500), Some(5500));
-        assert_eq!(xeon.get_duty(7000), Some(6000));
-        assert_eq!(xeon.get_duty(7200), Some(6500));
-        assert_eq!(xeon.get_duty(7400), Some(8000));
-        assert_eq!(xeon.get_duty(7600), Some(8500));
-        assert_eq!(xeon.get_duty(7700), Some(9000));
-        assert_eq!(xeon.get_duty(7800), Some(10000));
-        assert_eq!(xeon.get_duty(10000), Some(10000));
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[curve]]
+            temp = 70.0
+            duty = 100
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+
+            [[channels]]
+            pwm = "pwm2"
+            source = "gpu"
+
+            [[channels.curve]]
+            temp = 40.0
+            duty = 0
+
+            [[channels.curve]]
+            temp = 80.0
+            duty = 100
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.channels.len(), 2);
+
+        // First channel has no override, should use shared curve
+        assert!(config.channels[0].curve.is_none());
+
+        // Second channel has its own curve
+        let ch_curve = config.channels[1].curve.as_ref().unwrap();
+        assert_eq!(ch_curve.len(), 2);
+        assert_eq!(ch_curve[0].temp, 40.0);
+        assert_eq!(ch_curve[1].temp, 80.0);
+
+        // Verify the built curves differ
+        let shared = build_curve(&config.curve);
+        let override_curve = build_curve(ch_curve);
+        assert_ne!(shared, override_curve);
     }
 
     #[test]

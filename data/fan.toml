@@ -1,36 +1,48 @@
 # All fans go to max when either threshold is hit.
-critical_cpu_temp = 85
-critical_gpu_temp = 80
+critical_cpu_temp = 80
+critical_gpu_temp = 75
 
-# Fan curve. Temps in Celsius, duty in percent.
-# Even 5-degree steps, 100% at 75C so critical thresholds have room to work.
+# Smooth fan curve with tight steps through the idle range (~45C) and a
+# gentle ramp into load. Always-on floor at 10% avoids start/stop cycling.
 [[curve]]
-temp = 35.0
-duty = 0
+temp = 30.0
+duty = 10
+
+[[curve]]
+temp = 36.0
+duty = 12
 
 [[curve]]
 temp = 40.0
-duty = 15
+duty = 18
 
 [[curve]]
-temp = 45.0
-duty = 25
+temp = 43.0
+duty = 22
+
+[[curve]]
+temp = 46.0
+duty = 26
 
 [[curve]]
 temp = 50.0
-duty = 35
+duty = 30
 
 [[curve]]
-temp = 55.0
+temp = 54.0
+duty = 38
+
+[[curve]]
+temp = 58.0
 duty = 45
 
 [[curve]]
-temp = 60.0
+temp = 62.0
 duty = 55
 
 [[curve]]
-temp = 65.0
-duty = 65
+temp = 66.0
+duty = 68
 
 [[curve]]
 temp = 70.0
