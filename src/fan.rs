@@ -6,38 +6,50 @@
 
 use crate::nvml::NvidiaState;
 use serde::Deserialize;
-use std::{cmp, fs, io};
+use std::{cmp, collections::HashMap, fs, io, sync::{Arc, Mutex as StdMutex}};
 use sysfs_class::{HwMon, SysClass};
 
-const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
+pub(crate) const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
 
 // -- TOML config deserialization types --
 
 /// Top-level config file structure.
 #[derive(Deserialize)]
-struct FanConfig {
-    platform:          Option<String>,
-    critical_cpu_temp: f32,
-    critical_gpu_temp: f32,
-    curve:             Vec<CurvePoint>,
-    channels:          Vec<ChannelConfig>,
+pub(crate) struct FanConfig {
+    pub platform:          Option<String>,
+    pub critical_cpu_temp: f32,
+    pub critical_gpu_temp: f32,
+    pub hysteresis:        Option<f32>,
+    pub thermal_fallback:  Option<bool>,
+    pub thermal_cooldown:  Option<u32>,
+    pub curve:             Vec<CurvePoint>,
+    pub channels:          Vec<ChannelConfig>,
+    pub profiles:          Option<HashMap<String, ProfileConfig>>,
+}
+
+/// Per-profile curve override. When a profile is active, its curve
+/// replaces the shared top-level curve for channels that don't have
+/// their own per-channel override.
+#[derive(Deserialize)]
+pub(crate) struct ProfileConfig {
+    pub curve: Vec<CurvePoint>,
 }
 
 /// A single point on the fan curve. Human-friendly units.
 #[derive(Deserialize)]
-struct CurvePoint {
+pub(crate) struct CurvePoint {
     /// Temperature in Celsius.
-    temp: f32,
+    pub temp: f32,
     /// Duty cycle as a percentage (0-100).
-    duty: f32,
+    pub duty: f32,
 }
 
 /// Maps a PWM output to a temperature source, with an optional per-channel curve.
 #[derive(Deserialize)]
-struct ChannelConfig {
-    pwm:    String,
-    source: String,
-    curve:  Option<Vec<CurvePoint>>,
+pub(crate) struct ChannelConfig {
+    pub pwm:    String,
+    pub source: String,
+    pub curve:  Option<Vec<CurvePoint>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,16 +81,46 @@ pub struct FanChannel {
     pub curve:  FanCurve,
 }
 
+/// Stored per-channel definition from config, used to rebuild curves
+/// when the active profile changes.
+#[derive(Clone)]
+struct ChannelDef {
+    pwm:            String,
+    source:         TempSource,
+    override_curve: Option<FanCurve>,
+}
+
+/// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
+#[derive(Clone, Default)]
+pub struct FanStatus {
+    pub cpu_temp:       Option<u32>,
+    pub gpu_temp:       Option<u32>,
+    pub channel_duties: Vec<(String, Option<u8>)>,
+    pub critical:       bool,
+    pub config_loaded:  bool,
+}
+
 pub struct FanDaemon {
     channels:          Vec<FanChannel>,
+    channel_defs:      Vec<ChannelDef>,
+    shared_curve:      FanCurve,
+    profile_curves:    HashMap<String, FanCurve>,
     critical_cpu_temp: u32,
     critical_gpu_temp: u32,
+    hysteresis:        u32,
+    last_duties:       Vec<u8>,
+    last_temps:        Vec<Option<u32>>,
     platform_names:    Vec<String>,
     amdgpus:           Vec<HwMon>,
     platforms:         Vec<HwMon>,
     cpus:              Vec<HwMon>,
     nvidia:            NvidiaState,
+    status:            Arc<StdMutex<FanStatus>>,
+    thermal_fallback:  bool,
+    thermal_cooldown:  u32,
 }
+
+const DEFAULT_HYSTERESIS_C: f32 = 3.0;
 
 impl FanDaemon {
     /// Build a new fan daemon with per-channel temperature routing.
@@ -87,58 +129,166 @@ impl FanDaemon {
     /// Without one, fan control is disabled and the daemon only handles
     /// power profiles.
     pub fn new(nvidia: NvidiaState) -> Self {
-        let config = load_config();
-
-        let (channels, critical_cpu_temp, critical_gpu_temp, platform_names) =
-            if let Some(config) = config {
-                let shared_curve = build_curve(&config.curve);
-                let channels = config
-                    .channels
-                    .into_iter()
-                    .map(|ch| {
-                        let curve = ch.curve.as_deref()
-                            .map(build_curve)
-                            .unwrap_or_else(|| shared_curve.clone());
-                        FanChannel {
-                            pwm:    ch.pwm,
-                            source: parse_temp_source(&ch.source),
-                            curve,
-                        }
-                    })
-                    .collect();
-                let cpu_crit = (config.critical_cpu_temp * 1000.0) as u32;
-                let gpu_crit = (config.critical_gpu_temp * 1000.0) as u32;
-                let platform = config.platform
-                    .map(|name| vec![name])
-                    .unwrap_or_default();
-                (channels, cpu_crit, gpu_crit, platform)
-            } else {
-                log::warn!(
-                    "no fan config found at {}, fan control disabled. \
-                     run `powercurve fan-detect --generate` to create one",
-                    CONFIG_PATH
-                );
-                (Vec::new(), 0, 0, Vec::new())
-            };
-
+        let status = Arc::new(StdMutex::new(FanStatus::default()));
         let mut daemon = Self {
-            channels,
-            critical_cpu_temp,
-            critical_gpu_temp,
-            platform_names,
+            channels: Vec::new(),
+            channel_defs: Vec::new(),
+            shared_curve: FanCurve::default(),
+            profile_curves: HashMap::new(),
+            critical_cpu_temp: 0,
+            critical_gpu_temp: 0,
+            hysteresis: (DEFAULT_HYSTERESIS_C * 1000.0) as u32,
+            last_duties: Vec::new(),
+            last_temps: Vec::new(),
+            platform_names: Vec::new(),
             amdgpus: Vec::new(),
             platforms: Vec::new(),
             cpus: Vec::new(),
             nvidia,
+            status,
+            thermal_fallback: false,
+            thermal_cooldown: 30,
         };
 
-        if !daemon.platform_names.is_empty() {
-            if let Err(err) = daemon.discover() {
+        daemon.apply_config(load_config());
+        daemon
+    }
+
+    /// Shared status handle for D-Bus handlers to read.
+    pub fn status_handle(&self) -> Arc<StdMutex<FanStatus>> {
+        self.status.clone()
+    }
+
+    /// Apply a parsed config (or None for no-config fallback).
+    ///
+    /// Resets hysteresis tracking and re-discovers hwmon devices. Used
+    /// by both initial construction and hot reload.
+    fn apply_config(&mut self, config: Option<FanConfig>) {
+        if let Some(config) = config {
+            self.shared_curve = build_curve(&config.curve);
+
+            self.channel_defs = config
+                .channels
+                .iter()
+                .map(|ch| ChannelDef {
+                    pwm:            ch.pwm.clone(),
+                    source:         parse_temp_source(&ch.source),
+                    override_curve: ch.curve.as_deref().map(build_curve),
+                })
+                .collect();
+
+            self.channels = self.channel_defs.iter().map(|def| {
+                FanChannel {
+                    pwm:    def.pwm.clone(),
+                    source: def.source,
+                    curve:  def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
+                }
+            }).collect();
+
+            self.profile_curves = config.profiles
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, p)| (name.to_lowercase(), build_curve(&p.curve)))
+                .collect();
+
+            self.critical_cpu_temp = (config.critical_cpu_temp * 1000.0) as u32;
+            self.critical_gpu_temp = (config.critical_gpu_temp * 1000.0) as u32;
+            self.hysteresis = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
+            self.platform_names = config.platform
+                .map(|name| vec![name])
+                .unwrap_or_default();
+            self.thermal_fallback = config.thermal_fallback.unwrap_or(false);
+            self.thermal_cooldown = config.thermal_cooldown.unwrap_or(30);
+
+            if let Ok(mut s) = self.status.lock() {
+                s.config_loaded = true;
+            }
+        } else {
+            log::warn!(
+                "no fan config found at {}, fan control disabled. \
+                 run `powercurve fan-detect --generate` to create one",
+                CONFIG_PATH
+            );
+            self.channels.clear();
+            self.channel_defs.clear();
+            self.shared_curve = FanCurve::default();
+            self.profile_curves.clear();
+            self.critical_cpu_temp = 0;
+            self.critical_gpu_temp = 0;
+            self.hysteresis = (DEFAULT_HYSTERESIS_C * 1000.0) as u32;
+            self.platform_names.clear();
+        }
+
+        let count = self.channels.len();
+        self.last_duties = vec![0; count];
+        self.last_temps = vec![None; count];
+
+        if !self.platform_names.is_empty() {
+            if let Err(err) = self.discover() {
                 log::error!("fan daemon: {}", err);
             }
         }
+    }
 
-        daemon
+    /// Reload the fan config from disk. Validates before applying so a
+    /// broken config doesn't take down the running daemon.
+    pub fn reload(&mut self) {
+        use crate::config_check::{self, Severity};
+
+        log::info!("reloading fan config from {}", CONFIG_PATH);
+
+        let config = match load_config() {
+            Some(c) => c,
+            None => {
+                log::error!("reload failed: could not load config");
+                return;
+            }
+        };
+
+        let issues = config_check::validate(&config);
+        let errors = issues.iter().filter(|i| i.severity == Severity::Error).count();
+
+        for issue in &issues {
+            let level = match issue.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+            };
+            log::warn!("config {}: {}", level, issue.message);
+        }
+
+        if errors > 0 {
+            log::error!("reload aborted: config has {} error(s)", errors);
+            return;
+        }
+
+        self.apply_config(Some(config));
+        log::info!("fan config reloaded successfully");
+    }
+
+    /// Switch the active power profile, rebuilding channel curves.
+    ///
+    /// Resolution order per channel (most specific wins):
+    /// 1. Per-channel curve override from config
+    /// 2. Profile-specific curve (if one exists for this profile)
+    /// 3. Shared top-level curve
+    pub fn set_profile(&mut self, profile: &str) {
+        let key = profile.to_lowercase();
+        let base_curve = self.profile_curves.get(&key)
+            .unwrap_or(&self.shared_curve);
+
+        for (i, def) in self.channel_defs.iter().enumerate() {
+            if def.override_curve.is_none() {
+                if let Some(ch) = self.channels.get_mut(i) {
+                    ch.curve = base_curve.clone();
+                }
+            }
+        }
+
+        // Reset hysteresis tracking so the new curves take effect immediately
+        self.last_duties.fill(0);
+        self.last_temps.fill(None);
+
+        log::info!("fan curves updated for profile: {}", profile);
     }
 
     /// Discover all utilizable hwmon devices.
@@ -264,9 +414,11 @@ impl FanDaemon {
     ///
     /// If any component crosses the critical threshold, all fans go to max
     /// duty regardless of their individual temperature source.
-    pub fn step(&mut self) {
+    ///
+    /// Returns true if critical temps were reached (used by thermal fallback).
+    pub fn step(&mut self) -> bool {
         if self.platform_names.is_empty() {
-            return;
+            return false;
         }
 
         if self.discover().is_ok() {
@@ -275,20 +427,66 @@ impl FanDaemon {
             let critical = cpu_temp.is_some_and(|t| t >= self.critical_cpu_temp)
                 || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
 
+            let mut duties = Vec::new();
+
             if critical {
                 log::warn!("critical temp reached, all fans to max");
                 for channel in &self.channels {
                     self.set_channel_duty(&channel.pwm, Some(255));
+                    duties.push((channel.pwm.clone(), Some(255)));
                 }
             } else {
-                for channel in &self.channels {
+                for (i, channel) in self.channels.iter().enumerate() {
                     let temp = self.get_temp_for(channel.source);
-                    let duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
-                    self.set_channel_duty(&channel.pwm, duty);
+                    let curve_duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
+
+                    let effective_duty = match (curve_duty, temp) {
+                        (Some(new_duty), Some(current_temp)) => {
+                            let last = self.last_duties[i];
+                            if new_duty >= last {
+                                self.last_duties[i] = new_duty;
+                                self.last_temps[i] = Some(current_temp);
+                                Some(new_duty)
+                            } else if let Some(lt) = self.last_temps[i] {
+                                if lt.saturating_sub(current_temp) >= self.hysteresis {
+                                    self.last_duties[i] = new_duty;
+                                    self.last_temps[i] = Some(current_temp);
+                                    Some(new_duty)
+                                } else {
+                                    Some(last)
+                                }
+                            } else {
+                                self.last_duties[i] = new_duty;
+                                self.last_temps[i] = Some(current_temp);
+                                Some(new_duty)
+                            }
+                        }
+                        (duty, _) => duty,
+                    };
+
+                    self.set_channel_duty(&channel.pwm, effective_duty);
+                    duties.push((channel.pwm.clone(), effective_duty));
                 }
             }
+
+            if let Ok(mut s) = self.status.lock() {
+                s.cpu_temp = cpu_temp;
+                s.gpu_temp = gpu_temp;
+                s.channel_duties = duties;
+                s.critical = critical;
+            }
+
+            return critical;
         }
+
+        false
     }
+
+    /// Whether thermal fallback is enabled in the config.
+    pub fn thermal_fallback_enabled(&self) -> bool { self.thermal_fallback }
+
+    /// Cooldown period in seconds before stepping back up after thermal fallback.
+    pub fn thermal_cooldown_secs(&self) -> u32 { self.thermal_cooldown }
 }
 
 impl Drop for FanDaemon {
@@ -311,7 +509,7 @@ fn duty_from_curve(curve: &FanCurve, temp_millideg: u32) -> Option<u8> {
 
 /// Try to load and parse the TOML config file. Returns None if the file
 /// is missing (silent) or malformed (logged as error).
-fn load_config() -> Option<FanConfig> {
+pub(crate) fn load_config() -> Option<FanConfig> {
     let contents = fs::read_to_string(CONFIG_PATH).ok()?;
     match toml::from_str(&contents) {
         Ok(config) => {
@@ -614,5 +812,122 @@ mod tests {
         // Verify critical temp conversion (Celsius -> millidegrees)
         assert_eq!((config.critical_cpu_temp * 1000.0) as u32, 79_000);
         assert_eq!((config.critical_gpu_temp * 1000.0) as u32, 75_000);
+    }
+
+    #[test]
+    fn config_hysteresis_default() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.hysteresis.is_none());
+
+        let hyst = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
+        assert_eq!(hyst, 3000);
+    }
+
+    #[test]
+    fn config_hysteresis_custom() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+            hysteresis = 5.0
+
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hysteresis, Some(5.0));
+    }
+
+    /// Verify that rising temps update duty immediately and falling
+    /// temps within the hysteresis band hold the previous duty.
+    #[test]
+    fn hysteresis_holds_duty_on_small_drop() {
+        let curve = FanCurve::standard();
+        let hysteresis: u32 = 3000; // 3C in millidegrees
+
+        // Simulate rising: 50C -> duty at 50C
+        let temp_50c = 50_000u32;
+        let duty_at_50 = duty_from_curve(&curve, temp_50c).unwrap();
+
+        // Simulate a small drop: 49C (1C drop, within 3C hysteresis)
+        let temp_49c = 49_000u32;
+        let duty_at_49 = duty_from_curve(&curve, temp_49c).unwrap();
+
+        // The curve gives a lower duty at 49C
+        assert!(duty_at_49 < duty_at_50);
+
+        // But with hysteresis, a 1C drop shouldn't reduce duty
+        let drop = temp_50c.saturating_sub(temp_49c);
+        assert!(drop < hysteresis, "1C drop should be within 3C hysteresis band");
+
+        // A 4C drop should pass the hysteresis threshold
+        let temp_46c = 46_000u32;
+        let drop = temp_50c.saturating_sub(temp_46c);
+        assert!(drop >= hysteresis, "4C drop should exceed 3C hysteresis band");
+    }
+
+    #[test]
+    fn config_per_profile_curves() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[curve]]
+            temp = 70.0
+            duty = 100
+
+            [profiles.quiet]
+            curve = [
+                { temp = 40.0, duty = 0 },
+                { temp = 80.0, duty = 60 },
+            ]
+
+            [profiles.performance]
+            curve = [
+                { temp = 30.0, duty = 20 },
+                { temp = 60.0, duty = 100 },
+            ]
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        let profiles = config.profiles.as_ref().unwrap();
+        assert_eq!(profiles.len(), 2);
+        assert!(profiles.contains_key("quiet"));
+        assert!(profiles.contains_key("performance"));
+
+        let quiet_curve = build_curve(&profiles["quiet"].curve);
+        let perf_curve = build_curve(&profiles["performance"].curve);
+        let shared_curve = build_curve(&config.curve);
+
+        // Quiet curve is more conservative (lower duty at same temp)
+        assert!(quiet_curve.get_duty(50_00).unwrap() < shared_curve.get_duty(50_00).unwrap());
+        // Performance curve is more aggressive
+        assert!(perf_curve.get_duty(50_00).unwrap() > shared_curve.get_duty(50_00).unwrap());
     }
 }

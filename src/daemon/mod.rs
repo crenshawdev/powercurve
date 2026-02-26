@@ -14,20 +14,22 @@ use std::{
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
-    sync::Mutex,
+    sync::{Mutex, watch},
     time::sleep,
 };
 use zbus::Interface;
 
 use crate::{
     errors::ProfileError,
-    fan::FanDaemon,
+    fan::{FanDaemon, FanStatus},
     graphics::Graphics,
     kernel_parameters::{KernelParameter, NmiWatchdog},
     nvml::{NvmlHandle, NvidiaState},
     state,
     DBUS_NAME, DBUS_PATH,
 };
+
+use std::sync::Mutex as StdMutex;
 
 mod profiles;
 use self::profiles::{balanced, performance, quiet};
@@ -38,20 +40,30 @@ const POWER_PROFILES_DBUS_NAME: &str = "org.freedesktop.UPower.PowerProfiles";
 const POWER_PROFILES_DBUS_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
 
 static CONTINUE: AtomicBool = AtomicBool::new(true);
+static RELOAD: AtomicBool = AtomicBool::new(false);
 
+/// Wait for SIGINT or SIGTERM, then signal the main loop to exit.
 async fn signal_handling() {
     let mut int = signal(SignalKind::interrupt()).unwrap();
-    let mut hup = signal(SignalKind::hangup()).unwrap();
     let mut term = signal(SignalKind::terminate()).unwrap();
 
     let sig = tokio::select! {
         _ = int.recv() => "SIGINT",
-        _ = hup.recv() => "SIGHUP",
         _ = term.recv() => "SIGTERM"
     };
 
     log::info!("caught signal: {}", sig);
     CONTINUE.store(false, Ordering::SeqCst);
+}
+
+/// Listen for SIGHUP and flag a config reload on each occurrence.
+async fn sighup_handling() {
+    let mut hup = signal(SignalKind::hangup()).unwrap();
+    while CONTINUE.load(Ordering::SeqCst) {
+        hup.recv().await;
+        log::info!("caught SIGHUP, scheduling config reload");
+        RELOAD.store(true, Ordering::SeqCst);
+    }
 }
 
 // Enabled by default. Set S76_POWER_PCI_RUNTIME_PM=0 to disable if your system
@@ -60,21 +72,23 @@ static PCI_RUNTIME_PM: AtomicBool = AtomicBool::new(true);
 pub(crate) fn pci_runtime_pm_support() -> bool { PCI_RUNTIME_PM.load(Ordering::SeqCst) }
 
 struct PowerDaemon {
-    power_profile:  String,
-    profile_errors: Vec<ProfileError>,
-    held_profiles:  Vec<(u32, &'static str, String, String)>,
-    profile_ids:    u32,
-    connections:    Option<(zbus::Connection, zbus::Connection, zbus::Connection)>,
+    power_profile:    String,
+    profile_errors:   Vec<ProfileError>,
+    held_profiles:    Vec<(u32, &'static str, String, String)>,
+    profile_ids:      u32,
+    connections:      Option<(zbus::Connection, zbus::Connection, zbus::Connection)>,
+    profile_tx:       watch::Sender<String>,
 }
 
 impl PowerDaemon {
-    fn new() -> Self {
+    fn new(profile_tx: watch::Sender<String>) -> Self {
         Self {
             power_profile: String::new(),
             profile_errors: Vec::new(),
             held_profiles: Vec::new(),
             profile_ids: 0,
             connections: None,
+            profile_tx,
         }
     }
 
@@ -95,6 +109,7 @@ impl PowerDaemon {
 
         self.power_profile = name.into();
         state::save_profile(name);
+        let _ = self.profile_tx.send(name.into());
 
         if self.profile_errors.is_empty() {
             Ok(())
@@ -110,7 +125,7 @@ impl PowerDaemon {
 }
 
 #[derive(Clone)]
-struct PowerService(Arc<Mutex<PowerDaemon>>);
+struct PowerService(Arc<Mutex<PowerDaemon>>, Arc<StdMutex<FanStatus>>);
 
 impl PowerService {
     pub async fn emit_active_profile_changed(&self) {
@@ -214,9 +229,50 @@ impl PowerService {
         Ok(self.0.lock().await.power_profile.clone())
     }
 
+    /// Return CPU and GPU temps in millidegrees as a two-element array.
+    #[dbus_interface(out_args("cpu_temp", "gpu_temp"))]
+    async fn get_temperatures(&self) -> zbus::fdo::Result<(i64, i64)> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok((
+            status.cpu_temp.map_or(-1, |t| t as i64),
+            status.gpu_temp.map_or(-1, |t| t as i64),
+        ))
+    }
+
+    /// Return each fan channel's current duty as (name, duty_byte) pairs.
+    #[dbus_interface(out_args("duties"))]
+    async fn get_fan_duties(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.channel_duties.iter().map(|(name, duty)| {
+            (name.clone(), duty.map_or(-1, |d| d as i32))
+        }).collect())
+    }
+
+    /// Return whether the fan config is loaded and whether we're in critical state.
+    #[dbus_interface(out_args("config_loaded", "critical"))]
+    async fn get_fan_config_status(&self) -> zbus::fdo::Result<(bool, bool)> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok((status.config_loaded, status.critical))
+    }
+
     #[dbus_interface(signal)]
     async fn power_profile_switch(
         context: &zbus::SignalContext<'_>,
+        profile: &str,
+    ) -> zbus::Result<()>;
+
+    /// Emitted on thermal events: fallback_down, fallback_up, critical.
+    #[dbus_interface(signal)]
+    async fn thermal_event(
+        context: &zbus::SignalContext<'_>,
+        event_type: &str,
+        temp_millideg: i64,
         profile: &str,
     ) -> zbus::Result<()>;
 }
@@ -407,43 +463,31 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     NmiWatchdog.set(b"0");
 
-    let daemon = Arc::new(Mutex::new(PowerDaemon::new()));
-    let mut power_service = PowerService(daemon.clone());
+    let mut fan_daemon = FanDaemon::new(nvidia_state);
+    let fan_status = fan_daemon.status_handle();
+
+    let (profile_tx, profile_rx) = watch::channel(String::new());
+    let daemon = Arc::new(Mutex::new(PowerDaemon::new(profile_tx)));
+    let mut power_service = PowerService(daemon.clone(), fan_status);
 
     // powerprofilesctl
-    let upp_connection = zbus::ConnectionBuilder::system()
-        .context("failed to create zbus connection builder")?
-        .name(POWER_PROFILES_DBUS_NAME)
-        .context("unable to register name")?
-        .serve_at(POWER_PROFILES_DBUS_PATH, UPowerPowerProfiles(daemon.clone()))
-        .context("unable to serve")?
-        .build()
-        .await
-        .context("unable to create system service for org.freedesktop.UPower.PowerProfiles")?;
+    let upp_connection = connect_dbus(
+        POWER_PROFILES_DBUS_NAME,
+        POWER_PROFILES_DBUS_PATH,
+        || UPowerPowerProfiles(daemon.clone()),
+    )
+    .await?;
 
     // gnome-shell
-    let hadess_connection = zbus::ConnectionBuilder::system()
-        .context("failed to create zbus connection builder")?
-        .name(NET_HADESS_POWER_PROFILES_DBUS_NAME)
-        .context("unable to register name")?
-        .serve_at(
-            NET_HADESS_POWER_PROFILES_DBUS_PATH,
-            NetHadessPowerProfiles(UPowerPowerProfiles(daemon)),
-        )
-        .context("unable to serve")?
-        .build()
-        .await
-        .context("unable to create system service for net.hadess.PowerProfiles")?;
+    let hadess_connection = connect_dbus(
+        NET_HADESS_POWER_PROFILES_DBUS_NAME,
+        NET_HADESS_POWER_PROFILES_DBUS_PATH,
+        || NetHadessPowerProfiles(UPowerPowerProfiles(daemon.clone())),
+    )
+    .await?;
 
-    let connection = zbus::ConnectionBuilder::system()
-        .context("failed to create zbus connection builder")?
-        .name(DBUS_NAME)
-        .context("unable to register name")?
-        .serve_at(DBUS_PATH, power_service.clone())
-        .context("unable to serve")?
-        .build()
-        .await
-        .context("unable to create system service for com.vintagetechie.PowerCurve")?;
+    let power_service_clone = power_service.clone();
+    let connection = connect_dbus(DBUS_NAME, DBUS_PATH, || power_service_clone.clone()).await?;
 
     power_service.0.lock().await.connections =
         Some((connection.clone(), upp_connection, hadess_connection));
@@ -464,17 +508,101 @@ pub async fn daemon() -> anyhow::Result<()> {
         log::warn!("failed to set initial profile: {}", why);
     }
 
-    let mut fan_daemon = FanDaemon::new(nvidia_state);
+    let sighup_fut = sighup_handling();
 
+    let thermal_fallback = fan_daemon.thermal_fallback_enabled();
+    let thermal_cooldown = fan_daemon.thermal_cooldown_secs();
+    let mut thermal_service = power_service.clone();
+    let thermal_context = context.clone();
+
+    let mut profile_rx = profile_rx;
     let main_loop = async move {
+        let mut fallback_active = false;
+        let mut original_profile: Option<String> = None;
+        let mut cool_ticks: u32 = 0;
+
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
-            fan_daemon.step();
+
+            if RELOAD.swap(false, Ordering::SeqCst) {
+                fan_daemon.reload();
+            }
+
+            if profile_rx.has_changed().unwrap_or(false) {
+                let profile = profile_rx.borrow_and_update().clone();
+                if !profile.is_empty() {
+                    fan_daemon.set_profile(&profile);
+                    // If user manually changed profile, clear fallback state
+                    if fallback_active {
+                        log::info!("manual profile change during thermal fallback, resetting");
+                        fallback_active = false;
+                        original_profile = None;
+                        cool_ticks = 0;
+                    }
+                }
+            }
+
+            let critical = fan_daemon.step();
+
+            if thermal_fallback {
+                if critical && !fallback_active {
+                    let current = thermal_service.0.lock().await.power_profile.clone();
+                    let next = match current.as_str() {
+                        "Performance" => Some("Balanced"),
+                        "Balanced" => Some("Quiet"),
+                        _ => None,
+                    };
+                    if let Some(target) = next {
+                        log::warn!("thermal fallback: {} -> {}", current, target);
+                        original_profile.get_or_insert(current);
+                        fallback_active = true;
+                        cool_ticks = 0;
+
+                        let temp = fan_daemon.status_handle().lock()
+                            .map(|s| s.cpu_temp.unwrap_or(0).max(s.gpu_temp.unwrap_or(0)))
+                            .unwrap_or(0);
+
+                        let _ = match target {
+                            "Quiet" => thermal_service.quiet(thermal_context.clone()).await,
+                            "Balanced" => thermal_service.balanced(thermal_context.clone()).await,
+                            _ => Ok(()),
+                        };
+
+                        let _ = PowerService::thermal_event(
+                            &thermal_context, "fallback_down", temp as i64, target,
+                        ).await;
+                    }
+                } else if fallback_active && !critical {
+                    cool_ticks += 1;
+                    if cool_ticks >= thermal_cooldown {
+                        if let Some(ref orig) = original_profile {
+                            log::info!("thermal recovery: restoring profile {}", orig);
+                            let _ = match orig.as_str() {
+                                "Performance" => thermal_service.performance(thermal_context.clone()).await,
+                                "Balanced" => thermal_service.balanced(thermal_context.clone()).await,
+                                _ => thermal_service.quiet(thermal_context.clone()).await,
+                            };
+
+                            let _ = PowerService::thermal_event(
+                                &thermal_context, "fallback_up", 0, orig,
+                            ).await;
+                        }
+                        fallback_active = false;
+                        original_profile = None;
+                        cool_ticks = 0;
+                    }
+                } else if critical {
+                    cool_ticks = 0;
+                }
+            }
         }
     };
 
-    log::info!("Handling dbus requests");
-    futures_lite::future::zip(signal_handling_fut, main_loop).await;
+    log::info!("handling dbus requests");
+    futures_lite::future::zip(signal_handling_fut, async {
+        futures_lite::future::zip(sighup_fut, main_loop).await;
+    })
+    .await;
 
     log::info!("daemon exited from loop");
     Ok(())
@@ -491,4 +619,60 @@ fn profile_to_upp_str(system76_profile: &str) -> &'static str {
 
 fn zbus_error_from_display<E: Display>(why: E) -> zbus::fdo::Error {
     zbus::fdo::Error::Failed(format!("{}", why))
+}
+
+const MAX_DBUS_RETRIES: u32 = 5;
+
+/// Connect to the system bus with retry and exponential backoff.
+///
+/// Bus name acquisition can fail if another process holds the name. This
+/// retries a few times before giving up, which handles transient races
+/// during service restarts.
+async fn connect_dbus<I, F>(
+    bus_name: &'static str,
+    path: &'static str,
+    make_iface: F,
+) -> anyhow::Result<zbus::Connection>
+where
+    I: zbus::Interface,
+    F: Fn() -> I,
+{
+    let mut last_err = None;
+
+    for attempt in 1..=MAX_DBUS_RETRIES {
+        let result = zbus::ConnectionBuilder::system()
+            .context("failed to create zbus connection builder")?
+            .name(bus_name)
+            .context("unable to register name")?
+            .serve_at(path, make_iface())
+            .context("unable to serve")?
+            .build()
+            .await;
+
+        match result {
+            Ok(conn) => return Ok(conn),
+            Err(e) => {
+                if attempt < MAX_DBUS_RETRIES {
+                    let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                    log::warn!(
+                        "{}: attempt {}/{} failed ({}), retrying in {}ms",
+                        bus_name,
+                        attempt,
+                        MAX_DBUS_RETRIES,
+                        e,
+                        delay.as_millis(),
+                    );
+                    sleep(delay).await;
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "failed to acquire {} after {} attempts, check if another instance is running: {}",
+        bus_name,
+        MAX_DBUS_RETRIES,
+        last_err.unwrap(),
+    ))
 }

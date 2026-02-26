@@ -12,7 +12,27 @@
 
     <method name="Performance"></method>
 
+    <method name="GetTemperatures">
+      <arg name="cpu_temp" type="x" direction="out"/>
+      <arg name="gpu_temp" type="x" direction="out"/>
+    </method>
+
+    <method name="GetFanDuties">
+      <arg name="duties" type="a(si)" direction="out"/>
+    </method>
+
+    <method name="GetFanConfigStatus">
+      <arg name="config_loaded" type="b" direction="out"/>
+      <arg name="critical" type="b" direction="out"/>
+    </method>
+
     <signal name="PowerProfileSwitch">
+      <arg name="profile" type="s"/>
+    </signal>
+
+    <signal name="ThermalEvent">
+      <arg name="event_type" type="s"/>
+      <arg name="temp_millideg" type="x"/>
       <arg name="profile" type="s"/>
     </signal>
   </interface>
