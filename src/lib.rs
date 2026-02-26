@@ -5,6 +5,7 @@
 pub mod acpi_platform;
 pub mod args;
 pub mod client;
+pub mod config_check;
 pub mod cpufreq;
 pub mod daemon;
 pub mod errors;

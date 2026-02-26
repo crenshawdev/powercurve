@@ -9,35 +9,36 @@ use serde::Deserialize;
 use std::{cmp, fs, io};
 use sysfs_class::{HwMon, SysClass};
 
-const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
+pub(crate) const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
 
 // -- TOML config deserialization types --
 
 /// Top-level config file structure.
 #[derive(Deserialize)]
-struct FanConfig {
-    platform:          Option<String>,
-    critical_cpu_temp: f32,
-    critical_gpu_temp: f32,
-    curve:             Vec<CurvePoint>,
-    channels:          Vec<ChannelConfig>,
+pub(crate) struct FanConfig {
+    pub platform:          Option<String>,
+    pub critical_cpu_temp: f32,
+    pub critical_gpu_temp: f32,
+    pub hysteresis:        Option<f32>,
+    pub curve:             Vec<CurvePoint>,
+    pub channels:          Vec<ChannelConfig>,
 }
 
 /// A single point on the fan curve. Human-friendly units.
 #[derive(Deserialize)]
-struct CurvePoint {
+pub(crate) struct CurvePoint {
     /// Temperature in Celsius.
-    temp: f32,
+    pub temp: f32,
     /// Duty cycle as a percentage (0-100).
-    duty: f32,
+    pub duty: f32,
 }
 
 /// Maps a PWM output to a temperature source, with an optional per-channel curve.
 #[derive(Deserialize)]
-struct ChannelConfig {
-    pwm:    String,
-    source: String,
-    curve:  Option<Vec<CurvePoint>>,
+pub(crate) struct ChannelConfig {
+    pub pwm:    String,
+    pub source: String,
+    pub curve:  Option<Vec<CurvePoint>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,12 +74,17 @@ pub struct FanDaemon {
     channels:          Vec<FanChannel>,
     critical_cpu_temp: u32,
     critical_gpu_temp: u32,
+    hysteresis:        u32,
+    last_duties:       Vec<u8>,
+    last_temps:        Vec<Option<u32>>,
     platform_names:    Vec<String>,
     amdgpus:           Vec<HwMon>,
     platforms:         Vec<HwMon>,
     cpus:              Vec<HwMon>,
     nvidia:            NvidiaState,
 }
+
+const DEFAULT_HYSTERESIS_C: f32 = 3.0;
 
 impl FanDaemon {
     /// Build a new fan daemon with per-channel temperature routing.
@@ -89,10 +95,10 @@ impl FanDaemon {
     pub fn new(nvidia: NvidiaState) -> Self {
         let config = load_config();
 
-        let (channels, critical_cpu_temp, critical_gpu_temp, platform_names) =
+        let (channels, critical_cpu_temp, critical_gpu_temp, hysteresis, platform_names) =
             if let Some(config) = config {
                 let shared_curve = build_curve(&config.curve);
-                let channels = config
+                let channels: Vec<FanChannel> = config
                     .channels
                     .into_iter()
                     .map(|ch| {
@@ -108,23 +114,28 @@ impl FanDaemon {
                     .collect();
                 let cpu_crit = (config.critical_cpu_temp * 1000.0) as u32;
                 let gpu_crit = (config.critical_gpu_temp * 1000.0) as u32;
+                let hyst = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
                 let platform = config.platform
                     .map(|name| vec![name])
                     .unwrap_or_default();
-                (channels, cpu_crit, gpu_crit, platform)
+                (channels, cpu_crit, gpu_crit, hyst, platform)
             } else {
                 log::warn!(
                     "no fan config found at {}, fan control disabled. \
                      run `powercurve fan-detect --generate` to create one",
                     CONFIG_PATH
                 );
-                (Vec::new(), 0, 0, Vec::new())
+                (Vec::new(), 0, 0, (DEFAULT_HYSTERESIS_C * 1000.0) as u32, Vec::new())
             };
 
+        let channel_count = channels.len();
         let mut daemon = Self {
             channels,
             critical_cpu_temp,
             critical_gpu_temp,
+            hysteresis,
+            last_duties: vec![0; channel_count],
+            last_temps: vec![None; channel_count],
             platform_names,
             amdgpus: Vec::new(),
             platforms: Vec::new(),
@@ -281,10 +292,37 @@ impl FanDaemon {
                     self.set_channel_duty(&channel.pwm, Some(255));
                 }
             } else {
-                for channel in &self.channels {
+                for (i, channel) in self.channels.iter().enumerate() {
                     let temp = self.get_temp_for(channel.source);
-                    let duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
-                    self.set_channel_duty(&channel.pwm, duty);
+                    let curve_duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
+
+                    let effective_duty = match (curve_duty, temp) {
+                        (Some(new_duty), Some(current_temp)) => {
+                            let last = self.last_duties[i];
+                            if new_duty >= last {
+                                // temp rising or steady, apply immediately
+                                self.last_duties[i] = new_duty;
+                                self.last_temps[i] = Some(current_temp);
+                                Some(new_duty)
+                            } else if let Some(lt) = self.last_temps[i] {
+                                // temp falling, only reduce if we've dropped enough
+                                if lt.saturating_sub(current_temp) >= self.hysteresis {
+                                    self.last_duties[i] = new_duty;
+                                    self.last_temps[i] = Some(current_temp);
+                                    Some(new_duty)
+                                } else {
+                                    Some(last)
+                                }
+                            } else {
+                                self.last_duties[i] = new_duty;
+                                self.last_temps[i] = Some(current_temp);
+                                Some(new_duty)
+                            }
+                        }
+                        (duty, _) => duty,
+                    };
+
+                    self.set_channel_duty(&channel.pwm, effective_duty);
                 }
             }
         }
@@ -311,7 +349,7 @@ fn duty_from_curve(curve: &FanCurve, temp_millideg: u32) -> Option<u8> {
 
 /// Try to load and parse the TOML config file. Returns None if the file
 /// is missing (silent) or malformed (logged as error).
-fn load_config() -> Option<FanConfig> {
+pub(crate) fn load_config() -> Option<FanConfig> {
     let contents = fs::read_to_string(CONFIG_PATH).ok()?;
     match toml::from_str(&contents) {
         Ok(config) => {
@@ -614,5 +652,75 @@ mod tests {
         // Verify critical temp conversion (Celsius -> millidegrees)
         assert_eq!((config.critical_cpu_temp * 1000.0) as u32, 79_000);
         assert_eq!((config.critical_gpu_temp * 1000.0) as u32, 75_000);
+    }
+
+    #[test]
+    fn config_hysteresis_default() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.hysteresis.is_none());
+
+        let hyst = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
+        assert_eq!(hyst, 3000);
+    }
+
+    #[test]
+    fn config_hysteresis_custom() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+            hysteresis = 5.0
+
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hysteresis, Some(5.0));
+    }
+
+    /// Verify that rising temps update duty immediately and falling
+    /// temps within the hysteresis band hold the previous duty.
+    #[test]
+    fn hysteresis_holds_duty_on_small_drop() {
+        let curve = FanCurve::standard();
+        let hysteresis: u32 = 3000; // 3C in millidegrees
+
+        // Simulate rising: 50C -> duty at 50C
+        let temp_50c = 50_000u32;
+        let duty_at_50 = duty_from_curve(&curve, temp_50c).unwrap();
+
+        // Simulate a small drop: 49C (1C drop, within 3C hysteresis)
+        let temp_49c = 49_000u32;
+        let duty_at_49 = duty_from_curve(&curve, temp_49c).unwrap();
+
+        // The curve gives a lower duty at 49C
+        assert!(duty_at_49 < duty_at_50);
+
+        // But with hysteresis, a 1C drop shouldn't reduce duty
+        let drop = temp_50c.saturating_sub(temp_49c);
+        assert!(drop < hysteresis, "1C drop should be within 3C hysteresis band");
+
+        // A 4C drop should pass the hysteresis threshold
+        let temp_46c = 46_000u32;
+        let drop = temp_50c.saturating_sub(temp_46c);
+        assert!(drop >= hysteresis, "4C drop should exceed 3C hysteresis band");
     }
 }

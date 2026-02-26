@@ -411,39 +411,23 @@ pub async fn daemon() -> anyhow::Result<()> {
     let mut power_service = PowerService(daemon.clone());
 
     // powerprofilesctl
-    let upp_connection = zbus::ConnectionBuilder::system()
-        .context("failed to create zbus connection builder")?
-        .name(POWER_PROFILES_DBUS_NAME)
-        .context("unable to register name")?
-        .serve_at(POWER_PROFILES_DBUS_PATH, UPowerPowerProfiles(daemon.clone()))
-        .context("unable to serve")?
-        .build()
-        .await
-        .context("unable to create system service for org.freedesktop.UPower.PowerProfiles")?;
+    let upp_connection = connect_dbus(
+        POWER_PROFILES_DBUS_NAME,
+        POWER_PROFILES_DBUS_PATH,
+        || UPowerPowerProfiles(daemon.clone()),
+    )
+    .await?;
 
     // gnome-shell
-    let hadess_connection = zbus::ConnectionBuilder::system()
-        .context("failed to create zbus connection builder")?
-        .name(NET_HADESS_POWER_PROFILES_DBUS_NAME)
-        .context("unable to register name")?
-        .serve_at(
-            NET_HADESS_POWER_PROFILES_DBUS_PATH,
-            NetHadessPowerProfiles(UPowerPowerProfiles(daemon)),
-        )
-        .context("unable to serve")?
-        .build()
-        .await
-        .context("unable to create system service for net.hadess.PowerProfiles")?;
+    let hadess_connection = connect_dbus(
+        NET_HADESS_POWER_PROFILES_DBUS_NAME,
+        NET_HADESS_POWER_PROFILES_DBUS_PATH,
+        || NetHadessPowerProfiles(UPowerPowerProfiles(daemon.clone())),
+    )
+    .await?;
 
-    let connection = zbus::ConnectionBuilder::system()
-        .context("failed to create zbus connection builder")?
-        .name(DBUS_NAME)
-        .context("unable to register name")?
-        .serve_at(DBUS_PATH, power_service.clone())
-        .context("unable to serve")?
-        .build()
-        .await
-        .context("unable to create system service for com.vintagetechie.PowerCurve")?;
+    let power_service_clone = power_service.clone();
+    let connection = connect_dbus(DBUS_NAME, DBUS_PATH, || power_service_clone.clone()).await?;
 
     power_service.0.lock().await.connections =
         Some((connection.clone(), upp_connection, hadess_connection));
@@ -491,4 +475,60 @@ fn profile_to_upp_str(system76_profile: &str) -> &'static str {
 
 fn zbus_error_from_display<E: Display>(why: E) -> zbus::fdo::Error {
     zbus::fdo::Error::Failed(format!("{}", why))
+}
+
+const MAX_DBUS_RETRIES: u32 = 5;
+
+/// Connect to the system bus with retry and exponential backoff.
+///
+/// Bus name acquisition can fail if another process holds the name. This
+/// retries a few times before giving up, which handles transient races
+/// during service restarts.
+async fn connect_dbus<I, F>(
+    bus_name: &'static str,
+    path: &'static str,
+    make_iface: F,
+) -> anyhow::Result<zbus::Connection>
+where
+    I: zbus::Interface,
+    F: Fn() -> I,
+{
+    let mut last_err = None;
+
+    for attempt in 1..=MAX_DBUS_RETRIES {
+        let result = zbus::ConnectionBuilder::system()
+            .context("failed to create zbus connection builder")?
+            .name(bus_name)
+            .context("unable to register name")?
+            .serve_at(path, make_iface())
+            .context("unable to serve")?
+            .build()
+            .await;
+
+        match result {
+            Ok(conn) => return Ok(conn),
+            Err(e) => {
+                if attempt < MAX_DBUS_RETRIES {
+                    let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                    log::warn!(
+                        "{}: attempt {}/{} failed ({}), retrying in {}ms",
+                        bus_name,
+                        attempt,
+                        MAX_DBUS_RETRIES,
+                        e,
+                        delay.as_millis(),
+                    );
+                    sleep(delay).await;
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "failed to acquire {} after {} attempts, check if another instance is running: {}",
+        bus_name,
+        MAX_DBUS_RETRIES,
+        last_err.unwrap(),
+    ))
 }

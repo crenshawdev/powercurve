@@ -41,7 +41,7 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
             Some("performance") => client.performance().await.map_err(zbus_error),
             _ => profile(&mut client).await.context("failed to get power profile"),
         },
-        Args::Daemon { .. } | Args::FanDetect { .. } => unreachable!(),
+        Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config => unreachable!(),
     }
 }
 

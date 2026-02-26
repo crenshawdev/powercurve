@@ -61,4 +61,11 @@ pub enum Args {
         )]
         generate: bool,
     },
+    #[clap(
+        name = "config",
+        about = "Validate the fan configuration file",
+        long_about = "Loads and validates /etc/powercurve/fan.toml, reporting any errors or \
+                      warnings. Does not require root"
+    )]
+    Config,
 }
