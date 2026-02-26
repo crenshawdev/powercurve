@@ -513,8 +513,6 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     let sighup_fut = sighup_handling();
 
-    let thermal_fallback = fan_daemon.thermal_fallback_enabled();
-    let thermal_cooldown = fan_daemon.thermal_cooldown_secs();
     let mut thermal_service = power_service.clone();
     let thermal_context = context.clone();
 
@@ -531,6 +529,10 @@ pub async fn daemon() -> anyhow::Result<()> {
             if RELOAD.swap(false, Ordering::SeqCst) {
                 fan_daemon.reload();
             }
+
+            // Read these each iteration so hot-reloaded configs take effect.
+            let thermal_fallback = fan_daemon.thermal_fallback_enabled();
+            let thermal_cooldown = fan_daemon.thermal_cooldown_secs();
 
             if profile_rx.has_changed().unwrap_or(false) {
                 let profile = profile_rx.borrow_and_update().clone();
