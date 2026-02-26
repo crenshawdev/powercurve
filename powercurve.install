@@ -7,6 +7,8 @@ post_install() {
     mkdir -p /etc/powercurve
     powercurve fan-detect --generate > "$config" 2>/dev/null || true
   fi
+
+  systemctl enable --now com.vintagetechie.PowerCurve.service
 }
 
 post_upgrade() {
