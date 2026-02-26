@@ -35,6 +35,7 @@ install: all
 	install -D -m 0644 "data/$(ID).conf" "$(DESTDIR)$(datadir)/dbus-1/system.d/$(ID).conf"
 	install -D -m 0644 "data/$(ID).service" "$(DESTDIR)$(libdir)/systemd/system/$(ID).service"
 	install -D -m 0644 "data/$(ID).xml" "$(DESTDIR)$(datadir)/dbus-1/interfaces/$(ID).xml"
+	install -D -m 0644 "data/powercurve-monitor.service" "$(DESTDIR)$(libdir)/systemd/user/powercurve-monitor.service"
 	install -D -m 0755 "target/release/$(BIN)" "$(DESTDIR)$(bindir)/$(BIN)"
 
 uninstall:
@@ -42,6 +43,7 @@ uninstall:
 	rm -f "$(DESTDIR)$(datadir)/dbus-1/interfaces/$(ID).xml"
 	rm -f "$(DESTDIR)$(datadir)/dbus-1/system.d/$(ID).conf"
 	rm -f "$(DESTDIR)$(libdir)/systemd/system/$(ID).service"
+	rm -f "$(DESTDIR)$(libdir)/systemd/user/powercurve-monitor.service"
 
 update:
 	cargo update

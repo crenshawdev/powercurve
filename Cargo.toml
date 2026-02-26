@@ -49,4 +49,5 @@ assets = [
     ["data/com.vintagetechie.PowerCurve.conf", "usr/share/dbus-1/system.d/", "644"],
     ["data/com.vintagetechie.PowerCurve.xml", "usr/share/dbus-1/interfaces/", "644"],
     ["data/com.vintagetechie.PowerCurve.service", "usr/lib/systemd/system/", "644"],
+    ["data/powercurve-monitor.service", "usr/lib/systemd/user/", "644"],
 ]
