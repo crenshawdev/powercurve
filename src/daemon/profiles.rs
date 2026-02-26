@@ -4,7 +4,7 @@
 
 use super::pci_runtime_pm_support;
 use crate::{
-    errors::{PciDeviceError, ProfileError, ScsiHostError},
+    errors::{PciDeviceError, ProfileError},
     kernel_parameters::{DeviceList, Dirty},
     radeon::RadeonDevice,
     Profile,
@@ -36,7 +36,7 @@ pub fn balanced(errors: &mut Vec<ProfileError>) {
 
     RadeonDevice::get_devices().for_each(|dev| dev.set_profiles("auto", "performance", "auto"));
 
-    catch!(errors, scsi_host_link_time_pm_policy(&["med_power_with_dipm", "medium_power"]));
+    scsi_host_link_time_pm_policy(&["med_power_with_dipm", "medium_power"]);
 
     if pci_runtime_pm_support() {
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::On));
@@ -65,7 +65,7 @@ pub fn performance(errors: &mut Vec<ProfileError>) {
 
     Dirty::default().set_max_lost_work(15);
     RadeonDevice::get_devices().for_each(|dev| dev.set_profiles("high", "performance", "auto"));
-    catch!(errors, scsi_host_link_time_pm_policy(&["med_power_with_dipm", "max_performance"]));
+    scsi_host_link_time_pm_policy(&["med_power_with_dipm", "max_performance"]);
     crate::cpufreq::set(Profile::Performance, 100);
     catch!(
         errors,
@@ -93,7 +93,7 @@ pub fn quiet(errors: &mut Vec<ProfileError>) {
 
     Dirty::default().set_max_lost_work(15);
     RadeonDevice::get_devices().for_each(|dev| dev.set_profiles("low", "battery", "low"));
-    catch!(errors, scsi_host_link_time_pm_policy(&["min_power", "min_power"]));
+    scsi_host_link_time_pm_policy(&["min_power", "min_power"]);
     crate::cpufreq::set(Profile::Quiet, 50);
 
     catch!(
@@ -133,20 +133,18 @@ fn pci_device_runtime_pm(pm: RuntimePowerManagement) -> Result<(), PciDeviceErro
 }
 
 /// Iterates on all available SCSI/SATA hosts, setting the first link time power management policy
-/// that succeeds.
-fn scsi_host_link_time_pm_policy(policies: &'static [&'static str]) -> Result<(), ScsiHostError> {
+/// that succeeds. Hosts that don't support the requested policy are logged and skipped.
+fn scsi_host_link_time_pm_policy(policies: &'static [&'static str]) {
     for device in ScsiHost::iter() {
         match device {
             Ok(device) => {
-                device.set_link_power_management_policy(policies).map_err(|why| {
-                    ScsiHostError::LinkTimePolicy(policies[0], device.id().to_owned(), why)
-                })?;
+                if let Err(why) = device.set_link_power_management_policy(policies) {
+                    log::debug!("scsi host {}: {}", device.id(), why);
+                }
             }
             Err(why) => {
                 log::warn!("failed to iterate SCSI Host device: {}", why);
             }
         }
     }
-
-    Ok(())
 }
