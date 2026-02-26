@@ -81,3 +81,74 @@ pub enum Args {
     )]
     Monitor,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_daemon() {
+        let args = Args::parse_from(["powercurve", "daemon"]);
+        assert!(matches!(args, Args::Daemon { quiet: false, verbose: false }));
+    }
+
+    #[test]
+    fn parse_daemon_verbose() {
+        let args = Args::parse_from(["powercurve", "daemon", "--verbose"]);
+        assert!(matches!(args, Args::Daemon { verbose: true, .. }));
+    }
+
+    #[test]
+    fn parse_profile_set() {
+        let args = Args::parse_from(["powercurve", "profile", "balanced"]);
+        match args {
+            Args::Profile { profile } => assert_eq!(profile.as_deref(), Some("balanced")),
+            _ => panic!("expected Profile variant"),
+        }
+    }
+
+    #[test]
+    fn parse_profile_query() {
+        let args = Args::parse_from(["powercurve", "profile"]);
+        match args {
+            Args::Profile { profile } => assert!(profile.is_none()),
+            _ => panic!("expected Profile variant"),
+        }
+    }
+
+    #[test]
+    fn parse_status() {
+        let args = Args::parse_from(["powercurve", "status"]);
+        assert!(matches!(args, Args::Status));
+    }
+
+    #[test]
+    fn parse_config() {
+        let args = Args::parse_from(["powercurve", "config"]);
+        assert!(matches!(args, Args::Config));
+    }
+
+    #[test]
+    fn parse_monitor() {
+        let args = Args::parse_from(["powercurve", "monitor"]);
+        assert!(matches!(args, Args::Monitor));
+    }
+
+    #[test]
+    fn parse_fan_detect() {
+        let args = Args::parse_from(["powercurve", "fan-detect"]);
+        assert!(matches!(args, Args::FanDetect { generate: false }));
+    }
+
+    #[test]
+    fn parse_fan_detect_generate() {
+        let args = Args::parse_from(["powercurve", "fan-detect", "--generate"]);
+        assert!(matches!(args, Args::FanDetect { generate: true }));
+    }
+
+    #[test]
+    fn invalid_profile_rejected() {
+        let result = Args::try_parse_from(["powercurve", "profile", "turbo"]);
+        assert!(result.is_err());
+    }
+}
