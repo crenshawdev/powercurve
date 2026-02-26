@@ -24,6 +24,7 @@ use crate::{
     fan::FanDaemon,
     graphics::Graphics,
     kernel_parameters::{KernelParameter, NmiWatchdog},
+    nvml::{NvmlHandle, NvidiaState},
     state,
     DBUS_NAME, DBUS_PATH,
 };
@@ -389,7 +390,20 @@ pub async fn daemon() -> anyhow::Result<()> {
     PCI_RUNTIME_PM.store(pci_runtime_pm, Ordering::SeqCst);
 
     let graphics = Graphics::new()?;
-    let nvidia_exists = !graphics.nvidia.is_empty();
+    let nvidia_state = if graphics.nvidia.is_empty() {
+        NvidiaState::Absent
+    } else {
+        match NvmlHandle::open() {
+            Some(handle) => {
+                log::info!("nvml: loaded, {} device(s)", handle.device_count());
+                NvidiaState::Active(handle)
+            }
+            None => {
+                log::warn!("nvidia GPU detected but NVML unavailable, GPU fans will run at max");
+                NvidiaState::Unavailable
+            }
+        }
+    };
 
     NmiWatchdog.set(b"0");
 
@@ -450,7 +464,7 @@ pub async fn daemon() -> anyhow::Result<()> {
         log::warn!("failed to set initial profile: {}", why);
     }
 
-    let mut fan_daemon = FanDaemon::new(nvidia_exists);
+    let mut fan_daemon = FanDaemon::new(nvidia_state);
 
     let main_loop = async move {
         while CONTINUE.load(Ordering::SeqCst) {

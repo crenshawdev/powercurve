@@ -50,4 +50,15 @@ pub enum Args {
         )]
         profile: Option<String>,
     },
+    #[clap(
+        name = "fan-detect",
+        about = "Detect hwmon devices and generate a starter fan.toml"
+    )]
+    FanDetect {
+        #[clap(
+            long = "generate",
+            help = "Output only the generated fan.toml config (no device summary)"
+        )]
+        generate: bool,
+    },
 }

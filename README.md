@@ -1,9 +1,5 @@
 # vintagetechie-power
 
-> **Work in progress.** Power profile switching works on any Linux desktop.
-> Fan control currently requires a config file and a compatible hwmon
-> controller. See the roadmap below for what's coming.
-
 A lightweight power management daemon for Linux desktops. Drop-in
 replacement for `power-profiles-daemon` with deeper hardware control
 and configurable fan curves.
@@ -54,38 +50,64 @@ The active profile persists across restarts.
 
 ## Fan control
 
-Fan control is optional. Without a config file, the daemon handles power
-profiles only. To enable fan curves, create `/etc/vintagetechie-power/fan.toml`.
+The daemon controls fans through hwmon PWM outputs using a config file
+at `/etc/vintagetechie-power/fan.toml`. The Arch package generates this
+automatically on install by scanning hwmon devices for PWM-capable
+controllers. Without a config, fan control is disabled and the daemon
+only manages power profiles.
+
+Run `fan-detect` to see what the daemon found on your hardware:
+
+```
+vintagetechie-power fan-detect
+```
+
+This prints every hwmon device on the system with its temperature
+sensors, PWM outputs, fan RPMs, and labels, then suggests a config.
+
+To regenerate the config (or create one if it wasn't generated at
+install time):
+
+```
+sudo vintagetechie-power fan-detect --generate > /etc/vintagetechie-power/fan.toml
+```
+
+The `--generate` flag outputs only the TOML config with no device
+summary, making it safe to pipe directly to the config path.
+
+### Config format
 
 Each channel maps a PWM output to a temperature source (`cpu`, `gpu`,
-or `all`) and follows a shared fan curve. Temperatures are in Celsius,
-duty is a percentage (0-100).
+or `all`) and follows a fan curve. Temperatures are in Celsius, duty is
+a percentage (0-100). Channels without their own curve use the shared
+top-level curve.
 
 ```toml
-# hwmon device that controls the fans
+# hwmon device that controls the fans (find yours with fan-detect)
 platform = "nct6775"
 
 # all fans go to max when either threshold is hit
-critical_cpu_temp = 85
-critical_gpu_temp = 80
+critical_cpu_temp = 80
+critical_gpu_temp = 75
 
 # shared fan curve
 [[curve]]
-temp = 35.0
-duty = 0
+temp = 30.0
+duty = 10
 
 [[curve]]
 temp = 50.0
-duty = 40
+duty = 30
 
 [[curve]]
-temp = 65.0
-duty = 75
+temp = 70.0
+duty = 80
 
 [[curve]]
 temp = 75.0
 duty = 100
 
+# channel mapping
 [[channels]]
 pwm = "pwm1"
 source = "cpu"
@@ -99,9 +121,33 @@ pwm = "pwm3"
 source = "gpu"
 ```
 
+Channels can override the shared curve with their own:
+
+```toml
+[[channels]]
+pwm = "pwm3"
+source = "gpu"
+
+  [[channels.curve]]
+  temp = 40.0
+  duty = 0
+
+  [[channels.curve]]
+  temp = 80.0
+  duty = 100
+```
+
 The `platform` field tells the daemon which hwmon device has your fan
 PWM outputs. Common values: `nct6775`, `it8688`, `asus-ec-sensors`.
-Check what's on your system with `cat /sys/class/hwmon/hwmon*/name`.
+`fan-detect` fills this in automatically based on what it finds.
+
+### Temperature sources
+
+CPU temps come from hwmon drivers (`coretemp`, `k10temp`, `zenpower`).
+GPU temps combine two sources: AMD GPUs via the `amdgpu` hwmon driver
+and NVIDIA GPUs via NVML (loaded at runtime from `libnvidia-ml.so.1`,
+no dependency on `nvidia-smi`). If NVIDIA hardware is detected but NVML
+can't load, GPU-sourced channels run at max duty as a safety measure.
 
 If any sensor crosses its critical threshold, all fans go to maximum
 regardless of the curve.
@@ -120,18 +166,6 @@ The daemon runs as a systemd service:
 ```
 sudo systemctl enable --now com.vintagetechie.PowerDaemon
 ```
-
-## Roadmap
-
-The fan daemon is being reworked to support any Linux desktop with
-hwmon-based fan control. Planned changes:
-
-- `fan-detect` CLI command to enumerate hwmon devices and generate a
-  starter config
-- Per-channel fan curve overrides (different curves for CPU fan vs.
-  case fans)
-- Generic hwmon platform discovery (currently requires manual config
-  on non-System76 hardware)
 
 ## License
 
