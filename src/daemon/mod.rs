@@ -518,6 +518,7 @@ pub async fn daemon() -> anyhow::Result<()> {
     let mut profile_rx = profile_rx;
     let main_loop = async move {
         let mut fallback_active = false;
+        let mut fallback_pending = false;
         let mut original_profile: Option<String> = None;
         let mut cool_ticks: u32 = 0;
 
@@ -532,8 +533,11 @@ pub async fn daemon() -> anyhow::Result<()> {
                 let profile = profile_rx.borrow_and_update().clone();
                 if !profile.is_empty() {
                     fan_daemon.set_profile(&profile);
-                    // If user manually changed profile, clear fallback state
-                    if fallback_active {
+                    if fallback_pending {
+                        // This profile change came from the thermal fallback
+                        // code below, not from the user. Don't reset state.
+                        fallback_pending = false;
+                    } else if fallback_active {
                         log::info!("manual profile change during thermal fallback, resetting");
                         fallback_active = false;
                         original_profile = None;
@@ -556,6 +560,7 @@ pub async fn daemon() -> anyhow::Result<()> {
                         log::warn!("thermal fallback: {} -> {}", current, target);
                         original_profile.get_or_insert(current);
                         fallback_active = true;
+                        fallback_pending = true;
                         cool_ticks = 0;
 
                         let temp = fan_daemon.status_handle().lock()
@@ -577,6 +582,7 @@ pub async fn daemon() -> anyhow::Result<()> {
                     if cool_ticks >= thermal_cooldown {
                         if let Some(ref orig) = original_profile {
                             log::info!("thermal recovery: restoring profile {}", orig);
+                            fallback_pending = true;
                             let _ = match orig.as_str() {
                                 "Performance" => thermal_service.performance(thermal_context.clone()).await,
                                 "Balanced" => thermal_service.balanced(thermal_context.clone()).await,
