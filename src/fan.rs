@@ -93,63 +93,108 @@ impl FanDaemon {
     /// Without one, fan control is disabled and the daemon only handles
     /// power profiles.
     pub fn new(nvidia: NvidiaState) -> Self {
-        let config = load_config();
-
-        let (channels, critical_cpu_temp, critical_gpu_temp, hysteresis, platform_names) =
-            if let Some(config) = config {
-                let shared_curve = build_curve(&config.curve);
-                let channels: Vec<FanChannel> = config
-                    .channels
-                    .into_iter()
-                    .map(|ch| {
-                        let curve = ch.curve.as_deref()
-                            .map(build_curve)
-                            .unwrap_or_else(|| shared_curve.clone());
-                        FanChannel {
-                            pwm:    ch.pwm,
-                            source: parse_temp_source(&ch.source),
-                            curve,
-                        }
-                    })
-                    .collect();
-                let cpu_crit = (config.critical_cpu_temp * 1000.0) as u32;
-                let gpu_crit = (config.critical_gpu_temp * 1000.0) as u32;
-                let hyst = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
-                let platform = config.platform
-                    .map(|name| vec![name])
-                    .unwrap_or_default();
-                (channels, cpu_crit, gpu_crit, hyst, platform)
-            } else {
-                log::warn!(
-                    "no fan config found at {}, fan control disabled. \
-                     run `powercurve fan-detect --generate` to create one",
-                    CONFIG_PATH
-                );
-                (Vec::new(), 0, 0, (DEFAULT_HYSTERESIS_C * 1000.0) as u32, Vec::new())
-            };
-
-        let channel_count = channels.len();
         let mut daemon = Self {
-            channels,
-            critical_cpu_temp,
-            critical_gpu_temp,
-            hysteresis,
-            last_duties: vec![0; channel_count],
-            last_temps: vec![None; channel_count],
-            platform_names,
+            channels: Vec::new(),
+            critical_cpu_temp: 0,
+            critical_gpu_temp: 0,
+            hysteresis: (DEFAULT_HYSTERESIS_C * 1000.0) as u32,
+            last_duties: Vec::new(),
+            last_temps: Vec::new(),
+            platform_names: Vec::new(),
             amdgpus: Vec::new(),
             platforms: Vec::new(),
             cpus: Vec::new(),
             nvidia,
         };
 
-        if !daemon.platform_names.is_empty() {
-            if let Err(err) = daemon.discover() {
+        daemon.apply_config(load_config());
+        daemon
+    }
+
+    /// Apply a parsed config (or None for no-config fallback).
+    ///
+    /// Resets hysteresis tracking and re-discovers hwmon devices. Used
+    /// by both initial construction and hot reload.
+    fn apply_config(&mut self, config: Option<FanConfig>) {
+        if let Some(config) = config {
+            let shared_curve = build_curve(&config.curve);
+            self.channels = config
+                .channels
+                .into_iter()
+                .map(|ch| {
+                    let curve = ch.curve.as_deref()
+                        .map(build_curve)
+                        .unwrap_or_else(|| shared_curve.clone());
+                    FanChannel {
+                        pwm:    ch.pwm,
+                        source: parse_temp_source(&ch.source),
+                        curve,
+                    }
+                })
+                .collect();
+            self.critical_cpu_temp = (config.critical_cpu_temp * 1000.0) as u32;
+            self.critical_gpu_temp = (config.critical_gpu_temp * 1000.0) as u32;
+            self.hysteresis = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
+            self.platform_names = config.platform
+                .map(|name| vec![name])
+                .unwrap_or_default();
+        } else {
+            log::warn!(
+                "no fan config found at {}, fan control disabled. \
+                 run `powercurve fan-detect --generate` to create one",
+                CONFIG_PATH
+            );
+            self.channels.clear();
+            self.critical_cpu_temp = 0;
+            self.critical_gpu_temp = 0;
+            self.hysteresis = (DEFAULT_HYSTERESIS_C * 1000.0) as u32;
+            self.platform_names.clear();
+        }
+
+        let count = self.channels.len();
+        self.last_duties = vec![0; count];
+        self.last_temps = vec![None; count];
+
+        if !self.platform_names.is_empty() {
+            if let Err(err) = self.discover() {
                 log::error!("fan daemon: {}", err);
             }
         }
+    }
 
-        daemon
+    /// Reload the fan config from disk. Validates before applying so a
+    /// broken config doesn't take down the running daemon.
+    pub fn reload(&mut self) {
+        use crate::config_check::{self, Severity};
+
+        log::info!("reloading fan config from {}", CONFIG_PATH);
+
+        let config = match load_config() {
+            Some(c) => c,
+            None => {
+                log::error!("reload failed: could not load config");
+                return;
+            }
+        };
+
+        let issues = config_check::validate(&config);
+        let errors = issues.iter().filter(|i| i.severity == Severity::Error).count();
+
+        for issue in &issues {
+            let level = match issue.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+            };
+            log::warn!("config {}: {}", level, issue.message);
+        }
+
+        if errors > 0 {
+            log::error!("reload aborted: config has {} error(s)", errors);
+            return;
+        }
+
+        self.apply_config(Some(config));
+        log::info!("fan config reloaded successfully");
     }
 
     /// Discover all utilizable hwmon devices.

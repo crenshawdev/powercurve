@@ -38,20 +38,30 @@ const POWER_PROFILES_DBUS_NAME: &str = "org.freedesktop.UPower.PowerProfiles";
 const POWER_PROFILES_DBUS_PATH: &str = "/org/freedesktop/UPower/PowerProfiles";
 
 static CONTINUE: AtomicBool = AtomicBool::new(true);
+static RELOAD: AtomicBool = AtomicBool::new(false);
 
+/// Wait for SIGINT or SIGTERM, then signal the main loop to exit.
 async fn signal_handling() {
     let mut int = signal(SignalKind::interrupt()).unwrap();
-    let mut hup = signal(SignalKind::hangup()).unwrap();
     let mut term = signal(SignalKind::terminate()).unwrap();
 
     let sig = tokio::select! {
         _ = int.recv() => "SIGINT",
-        _ = hup.recv() => "SIGHUP",
         _ = term.recv() => "SIGTERM"
     };
 
     log::info!("caught signal: {}", sig);
     CONTINUE.store(false, Ordering::SeqCst);
+}
+
+/// Listen for SIGHUP and flag a config reload on each occurrence.
+async fn sighup_handling() {
+    let mut hup = signal(SignalKind::hangup()).unwrap();
+    while CONTINUE.load(Ordering::SeqCst) {
+        hup.recv().await;
+        log::info!("caught SIGHUP, scheduling config reload");
+        RELOAD.store(true, Ordering::SeqCst);
+    }
 }
 
 // Enabled by default. Set S76_POWER_PCI_RUNTIME_PM=0 to disable if your system
@@ -450,15 +460,25 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     let mut fan_daemon = FanDaemon::new(nvidia_state);
 
+    let sighup_fut = sighup_handling();
+
     let main_loop = async move {
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
+
+            if RELOAD.swap(false, Ordering::SeqCst) {
+                fan_daemon.reload();
+            }
+
             fan_daemon.step();
         }
     };
 
-    log::info!("Handling dbus requests");
-    futures_lite::future::zip(signal_handling_fut, main_loop).await;
+    log::info!("handling dbus requests");
+    futures_lite::future::zip(signal_handling_fut, async {
+        futures_lite::future::zip(sighup_fut, main_loop).await;
+    })
+    .await;
 
     log::info!("daemon exited from loop");
     Ok(())
