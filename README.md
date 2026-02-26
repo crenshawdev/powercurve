@@ -15,7 +15,7 @@ that talk to the `org.freedesktop.UPower.PowerProfiles` D-Bus interface
 
 ## Installation
 
-Available from the [VintageTechie Arch repo](https://codeberg.org/VintageTechie/vintagetechie-arch-repo):
+Available from the [VintageTechie Arch repo](https://vintagetechie.codeberg.page/vintagetechie-arch-repo/):
 
 ```
 sudo pacman -S vintagetechie-power-git
