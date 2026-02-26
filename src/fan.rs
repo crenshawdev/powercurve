@@ -118,6 +118,7 @@ pub struct FanDaemon {
     status:            Arc<StdMutex<FanStatus>>,
     thermal_fallback:  bool,
     thermal_cooldown:  u32,
+    current_profile:   String,
 }
 
 const DEFAULT_HYSTERESIS_C: f32 = 3.0;
@@ -148,6 +149,7 @@ impl FanDaemon {
             status,
             thermal_fallback: false,
             thermal_cooldown: 30,
+            current_profile: String::new(),
         };
 
         daemon.apply_config(load_config());
@@ -262,6 +264,14 @@ impl FanDaemon {
         }
 
         self.apply_config(Some(config));
+
+        // Re-apply the current profile's curve so channels don't fall
+        // back to the shared curve after a reload.
+        if !self.current_profile.is_empty() {
+            let profile = self.current_profile.clone();
+            self.set_profile(&profile);
+        }
+
         log::info!("fan config reloaded successfully");
     }
 
@@ -272,8 +282,8 @@ impl FanDaemon {
     /// 2. Profile-specific curve (if one exists for this profile)
     /// 3. Shared top-level curve
     pub fn set_profile(&mut self, profile: &str) {
-        let key = profile.to_lowercase();
-        let base_curve = self.profile_curves.get(&key)
+        self.current_profile = profile.to_lowercase();
+        let base_curve = self.profile_curves.get(&self.current_profile)
             .unwrap_or(&self.shared_curve);
 
         for (i, def) in self.channel_defs.iter().enumerate() {
