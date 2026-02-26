@@ -5,6 +5,7 @@
 pub mod acpi_platform;
 pub mod args;
 pub mod client;
+pub mod config_check;
 pub mod cpufreq;
 pub mod daemon;
 pub mod errors;
@@ -14,6 +15,7 @@ pub mod graphics;
 pub mod kernel_parameters;
 pub mod logging;
 pub mod modprobe;
+pub mod monitor;
 pub mod module;
 pub mod nvml;
 pub mod pci;

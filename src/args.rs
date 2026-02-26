@@ -61,4 +61,23 @@ pub enum Args {
         )]
         generate: bool,
     },
+    #[clap(
+        name = "config",
+        about = "Validate the fan configuration file",
+        long_about = "Loads and validates /etc/powercurve/fan.toml, reporting any errors or \
+                      warnings. Does not require root"
+    )]
+    Config,
+    #[clap(
+        about = "Show current daemon status",
+        long_about = "Displays the current power profile, temperatures, and fan duties. \
+                      Connects to the running daemon via D-Bus. Does not require root"
+    )]
+    Status,
+    #[clap(
+        about = "Monitor profile and thermal events with desktop notifications",
+        long_about = "Long-lived process that listens for PowerProfileSwitch and ThermalEvent \
+                      signals from the daemon and sends desktop notifications. Does not require root"
+    )]
+    Monitor,
 }
