@@ -20,6 +20,7 @@ struct TempInput {
     file:  String,
     label: String,
     value: String,
+    crit:  Option<u32>,
 }
 
 struct PwmOutput {
@@ -52,9 +53,12 @@ pub fn run(generate: bool) -> anyhow::Result<()> {
             && !GPU_DRIVERS.contains(&d.name.as_str())
     });
 
+    let cpu_crit = detect_cpu_critical(&devices);
+    let gpu_crit = detect_gpu_critical(&devices);
+
     if generate {
         if let Some(plat) = platform {
-            print!("{}", generate_config(plat));
+            print!("{}", generate_config(plat, cpu_crit, gpu_crit));
         }
         return Ok(());
     }
@@ -66,7 +70,7 @@ pub fn run(generate: bool) -> anyhow::Result<()> {
 
     if let Some(plat) = platform {
         println!("\nSuggested fan.toml:\n");
-        print!("{}", generate_config(plat));
+        print!("{}", generate_config(plat, cpu_crit, gpu_crit));
     } else {
         println!("\nNo hwmon device with PWM outputs found for fan control.");
         println!("If your fans are controlled through a different interface,");
@@ -127,7 +131,12 @@ fn discover_temps(hwmon_path: &Path) -> Vec<TempInput> {
             .map(|l| l.trim().to_owned())
             .unwrap_or_default();
 
-        temps.push(TempInput { file: input_file, label, value });
+        let crit_file = format!("temp{}_crit", i);
+        let crit = fs::read_to_string(hwmon_path.join(crit_file))
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok());
+
+        temps.push(TempInput { file: input_file, label, value, crit });
     }
 
     temps
@@ -174,10 +183,13 @@ fn print_device(dev: &HwmonDevice) {
     for temp in &dev.temps {
         let millideg: f64 = temp.value.parse().unwrap_or(0.0);
         let celsius = millideg / 1000.0;
+        let crit_str = temp.crit
+            .map(|c| format!(", crit {:.1}C", c as f64 / 1000.0))
+            .unwrap_or_default();
         if temp.label.is_empty() {
-            println!("    {}: {:.1}C", temp.file, celsius);
+            println!("    {}: {:.1}C{}", temp.file, celsius, crit_str);
         } else {
-            println!("    {}: {} ({:.1}C)", temp.file, temp.label, celsius);
+            println!("    {}: {} ({:.1}C{})", temp.file, temp.label, celsius, crit_str);
         }
     }
 
@@ -209,14 +221,63 @@ fn source_from_label(label: &str) -> &'static str {
     }
 }
 
+/// Detect a reasonable critical CPU temp by reading the thermal throttle
+/// point from sysfs when available, or falling back to per-driver defaults.
+/// Returns a value 15C below the throttle point so fans ramp before
+/// the CPU starts slowing itself down.
+fn detect_cpu_critical(devices: &[HwmonDevice]) -> u32 {
+    const MARGIN: u32 = 15;
+
+    for dev in devices {
+        if !CPU_DRIVERS.contains(&dev.name.as_str()) {
+            continue;
+        }
+
+        // Try to read temp_crit (Intel coretemp exposes this)
+        if let Some(crit) = dev.temps.iter().filter_map(|t| t.crit).max() {
+            let throttle = crit / 1000;
+            return throttle.saturating_sub(MARGIN);
+        }
+
+        // No temp_crit, fall back by driver name
+        return match dev.name.as_str() {
+            "coretemp"             => 85,
+            "k10temp" | "zenpower" => 80,
+            _                      => 80,
+        };
+    }
+
+    80
+}
+
+/// Detect a reasonable critical GPU temp using the same approach.
+fn detect_gpu_critical(devices: &[HwmonDevice]) -> u32 {
+    const MARGIN: u32 = 15;
+
+    for dev in devices {
+        if !GPU_DRIVERS.contains(&dev.name.as_str()) {
+            continue;
+        }
+
+        if let Some(crit) = dev.temps.iter().filter_map(|t| t.crit).max() {
+            let throttle = crit / 1000;
+            return throttle.saturating_sub(MARGIN);
+        }
+
+        return 75;
+    }
+
+    75
+}
+
 /// Generate a starter fan.toml from a platform device.
-fn generate_config(platform: &HwmonDevice) -> String {
+fn generate_config(platform: &HwmonDevice, cpu_crit: u32, gpu_crit: u32) -> String {
     let mut out = String::new();
     let has_labels = platform.pwms.iter().any(|p| !p.label.is_empty());
 
     writeln!(out, "platform = \"{}\"", platform.name).ok();
-    writeln!(out, "critical_cpu_temp = 80").ok();
-    writeln!(out, "critical_gpu_temp = 75").ok();
+    writeln!(out, "critical_cpu_temp = {}", cpu_crit).ok();
+    writeln!(out, "critical_gpu_temp = {}", gpu_crit).ok();
     writeln!(out).ok();
     writeln!(out, "# Smooth fan curve with tight steps through the idle range and a").ok();
     writeln!(out, "# gentle ramp into load. Always-on floor at 10% avoids start/stop cycling.").ok();
