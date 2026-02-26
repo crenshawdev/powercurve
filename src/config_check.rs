@@ -76,6 +76,7 @@ pub(crate) fn validate(config: &FanConfig) -> Vec<Issue> {
     validate_curve(&config.curve, "shared", &mut issues);
     validate_critical_temps(config, &mut issues);
     validate_channels(config, &mut issues);
+    validate_profiles(config, &mut issues);
     validate_hwmon(config, &mut issues);
 
     issues
@@ -150,6 +151,24 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             let label = format!("channel {} ({})", i, ch.pwm);
             validate_curve(curve, &label, issues);
         }
+    }
+}
+
+/// Validate per-profile curve overrides.
+fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
+    let Some(ref profiles) = config.profiles else { return };
+
+    let valid_names = ["quiet", "balanced", "performance"];
+    for (name, profile) in profiles {
+        if !valid_names.contains(&name.to_lowercase().as_str()) {
+            issues.push(Issue::warning(format!(
+                "profile '{}': unknown profile name, expected one of: quiet, balanced, performance",
+                name,
+            )));
+        }
+
+        let label = format!("profile '{}'", name);
+        validate_curve(&profile.curve, &label, issues);
     }
 }
 

@@ -6,7 +6,7 @@
 
 use crate::nvml::NvidiaState;
 use serde::Deserialize;
-use std::{cmp, fs, io};
+use std::{cmp, collections::HashMap, fs, io};
 use sysfs_class::{HwMon, SysClass};
 
 pub(crate) const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
@@ -22,6 +22,15 @@ pub(crate) struct FanConfig {
     pub hysteresis:        Option<f32>,
     pub curve:             Vec<CurvePoint>,
     pub channels:          Vec<ChannelConfig>,
+    pub profiles:          Option<HashMap<String, ProfileConfig>>,
+}
+
+/// Per-profile curve override. When a profile is active, its curve
+/// replaces the shared top-level curve for channels that don't have
+/// their own per-channel override.
+#[derive(Deserialize)]
+pub(crate) struct ProfileConfig {
+    pub curve: Vec<CurvePoint>,
 }
 
 /// A single point on the fan curve. Human-friendly units.
@@ -70,8 +79,20 @@ pub struct FanChannel {
     pub curve:  FanCurve,
 }
 
+/// Stored per-channel definition from config, used to rebuild curves
+/// when the active profile changes.
+#[derive(Clone)]
+struct ChannelDef {
+    pwm:            String,
+    source:         TempSource,
+    override_curve: Option<FanCurve>,
+}
+
 pub struct FanDaemon {
     channels:          Vec<FanChannel>,
+    channel_defs:      Vec<ChannelDef>,
+    shared_curve:      FanCurve,
+    profile_curves:    HashMap<String, FanCurve>,
     critical_cpu_temp: u32,
     critical_gpu_temp: u32,
     hysteresis:        u32,
@@ -95,6 +116,9 @@ impl FanDaemon {
     pub fn new(nvidia: NvidiaState) -> Self {
         let mut daemon = Self {
             channels: Vec::new(),
+            channel_defs: Vec::new(),
+            shared_curve: FanCurve::default(),
+            profile_curves: HashMap::new(),
             critical_cpu_temp: 0,
             critical_gpu_temp: 0,
             hysteresis: (DEFAULT_HYSTERESIS_C * 1000.0) as u32,
@@ -117,21 +141,32 @@ impl FanDaemon {
     /// by both initial construction and hot reload.
     fn apply_config(&mut self, config: Option<FanConfig>) {
         if let Some(config) = config {
-            let shared_curve = build_curve(&config.curve);
-            self.channels = config
+            self.shared_curve = build_curve(&config.curve);
+
+            self.channel_defs = config
                 .channels
-                .into_iter()
-                .map(|ch| {
-                    let curve = ch.curve.as_deref()
-                        .map(build_curve)
-                        .unwrap_or_else(|| shared_curve.clone());
-                    FanChannel {
-                        pwm:    ch.pwm,
-                        source: parse_temp_source(&ch.source),
-                        curve,
-                    }
+                .iter()
+                .map(|ch| ChannelDef {
+                    pwm:            ch.pwm.clone(),
+                    source:         parse_temp_source(&ch.source),
+                    override_curve: ch.curve.as_deref().map(build_curve),
                 })
                 .collect();
+
+            self.channels = self.channel_defs.iter().map(|def| {
+                FanChannel {
+                    pwm:    def.pwm.clone(),
+                    source: def.source,
+                    curve:  def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
+                }
+            }).collect();
+
+            self.profile_curves = config.profiles
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, p)| (name.to_lowercase(), build_curve(&p.curve)))
+                .collect();
+
             self.critical_cpu_temp = (config.critical_cpu_temp * 1000.0) as u32;
             self.critical_gpu_temp = (config.critical_gpu_temp * 1000.0) as u32;
             self.hysteresis = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
@@ -145,6 +180,9 @@ impl FanDaemon {
                 CONFIG_PATH
             );
             self.channels.clear();
+            self.channel_defs.clear();
+            self.shared_curve = FanCurve::default();
+            self.profile_curves.clear();
             self.critical_cpu_temp = 0;
             self.critical_gpu_temp = 0;
             self.hysteresis = (DEFAULT_HYSTERESIS_C * 1000.0) as u32;
@@ -195,6 +233,32 @@ impl FanDaemon {
 
         self.apply_config(Some(config));
         log::info!("fan config reloaded successfully");
+    }
+
+    /// Switch the active power profile, rebuilding channel curves.
+    ///
+    /// Resolution order per channel (most specific wins):
+    /// 1. Per-channel curve override from config
+    /// 2. Profile-specific curve (if one exists for this profile)
+    /// 3. Shared top-level curve
+    pub fn set_profile(&mut self, profile: &str) {
+        let key = profile.to_lowercase();
+        let base_curve = self.profile_curves.get(&key)
+            .unwrap_or(&self.shared_curve);
+
+        for (i, def) in self.channel_defs.iter().enumerate() {
+            if def.override_curve.is_none() {
+                if let Some(ch) = self.channels.get_mut(i) {
+                    ch.curve = base_curve.clone();
+                }
+            }
+        }
+
+        // Reset hysteresis tracking so the new curves take effect immediately
+        self.last_duties.fill(0);
+        self.last_temps.fill(None);
+
+        log::info!("fan curves updated for profile: {}", profile);
     }
 
     /// Discover all utilizable hwmon devices.
@@ -767,5 +831,52 @@ mod tests {
         let temp_46c = 46_000u32;
         let drop = temp_50c.saturating_sub(temp_46c);
         assert!(drop >= hysteresis, "4C drop should exceed 3C hysteresis band");
+    }
+
+    #[test]
+    fn config_per_profile_curves() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 35.0
+            duty = 0
+
+            [[curve]]
+            temp = 70.0
+            duty = 100
+
+            [profiles.quiet]
+            curve = [
+                { temp = 40.0, duty = 0 },
+                { temp = 80.0, duty = 60 },
+            ]
+
+            [profiles.performance]
+            curve = [
+                { temp = 30.0, duty = 20 },
+                { temp = 60.0, duty = 100 },
+            ]
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        let profiles = config.profiles.as_ref().unwrap();
+        assert_eq!(profiles.len(), 2);
+        assert!(profiles.contains_key("quiet"));
+        assert!(profiles.contains_key("performance"));
+
+        let quiet_curve = build_curve(&profiles["quiet"].curve);
+        let perf_curve = build_curve(&profiles["performance"].curve);
+        let shared_curve = build_curve(&config.curve);
+
+        // Quiet curve is more conservative (lower duty at same temp)
+        assert!(quiet_curve.get_duty(50_00).unwrap() < shared_curve.get_duty(50_00).unwrap());
+        // Performance curve is more aggressive
+        assert!(perf_curve.get_duty(50_00).unwrap() > shared_curve.get_duty(50_00).unwrap());
     }
 }

@@ -14,7 +14,7 @@ use std::{
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
-    sync::Mutex,
+    sync::{Mutex, watch},
     time::sleep,
 };
 use zbus::Interface;
@@ -70,21 +70,23 @@ static PCI_RUNTIME_PM: AtomicBool = AtomicBool::new(true);
 pub(crate) fn pci_runtime_pm_support() -> bool { PCI_RUNTIME_PM.load(Ordering::SeqCst) }
 
 struct PowerDaemon {
-    power_profile:  String,
-    profile_errors: Vec<ProfileError>,
-    held_profiles:  Vec<(u32, &'static str, String, String)>,
-    profile_ids:    u32,
-    connections:    Option<(zbus::Connection, zbus::Connection, zbus::Connection)>,
+    power_profile:    String,
+    profile_errors:   Vec<ProfileError>,
+    held_profiles:    Vec<(u32, &'static str, String, String)>,
+    profile_ids:      u32,
+    connections:      Option<(zbus::Connection, zbus::Connection, zbus::Connection)>,
+    profile_tx:       watch::Sender<String>,
 }
 
 impl PowerDaemon {
-    fn new() -> Self {
+    fn new(profile_tx: watch::Sender<String>) -> Self {
         Self {
             power_profile: String::new(),
             profile_errors: Vec::new(),
             held_profiles: Vec::new(),
             profile_ids: 0,
             connections: None,
+            profile_tx,
         }
     }
 
@@ -105,6 +107,7 @@ impl PowerDaemon {
 
         self.power_profile = name.into();
         state::save_profile(name);
+        let _ = self.profile_tx.send(name.into());
 
         if self.profile_errors.is_empty() {
             Ok(())
@@ -417,7 +420,8 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     NmiWatchdog.set(b"0");
 
-    let daemon = Arc::new(Mutex::new(PowerDaemon::new()));
+    let (profile_tx, profile_rx) = watch::channel(String::new());
+    let daemon = Arc::new(Mutex::new(PowerDaemon::new(profile_tx)));
     let mut power_service = PowerService(daemon.clone());
 
     // powerprofilesctl
@@ -462,12 +466,20 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     let sighup_fut = sighup_handling();
 
+    let mut profile_rx = profile_rx;
     let main_loop = async move {
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
 
             if RELOAD.swap(false, Ordering::SeqCst) {
                 fan_daemon.reload();
+            }
+
+            if profile_rx.has_changed().unwrap_or(false) {
+                let profile = profile_rx.borrow_and_update().clone();
+                if !profile.is_empty() {
+                    fan_daemon.set_profile(&profile);
+                }
             }
 
             fan_daemon.step();
