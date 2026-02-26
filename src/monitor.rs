@@ -9,6 +9,9 @@ use zbus::Connection;
 /// on the system bus and sends desktop notifications via the session bus.
 #[tokio::main(flavor = "current_thread")]
 pub async fn run() -> anyhow::Result<()> {
+    // Ignore SIGHUP so `kill -HUP $(pidof powercurve)` only reloads
+    // the daemon without killing the monitor.
+    unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN); }
     let system = Connection::system()
         .await
         .context("failed to connect to system bus")?;
