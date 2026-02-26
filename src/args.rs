@@ -68,4 +68,10 @@ pub enum Args {
                       warnings. Does not require root"
     )]
     Config,
+    #[clap(
+        about = "Show current daemon status",
+        long_about = "Displays the current power profile, temperatures, and fan duties. \
+                      Connects to the running daemon via D-Bus. Does not require root"
+    )]
+    Status,
 }

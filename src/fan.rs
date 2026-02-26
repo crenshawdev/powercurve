@@ -6,7 +6,7 @@
 
 use crate::nvml::NvidiaState;
 use serde::Deserialize;
-use std::{cmp, collections::HashMap, fs, io};
+use std::{cmp, collections::HashMap, fs, io, sync::{Arc, Mutex as StdMutex}};
 use sysfs_class::{HwMon, SysClass};
 
 pub(crate) const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
@@ -20,6 +20,8 @@ pub(crate) struct FanConfig {
     pub critical_cpu_temp: f32,
     pub critical_gpu_temp: f32,
     pub hysteresis:        Option<f32>,
+    pub thermal_fallback:  Option<bool>,
+    pub thermal_cooldown:  Option<u32>,
     pub curve:             Vec<CurvePoint>,
     pub channels:          Vec<ChannelConfig>,
     pub profiles:          Option<HashMap<String, ProfileConfig>>,
@@ -88,6 +90,16 @@ struct ChannelDef {
     override_curve: Option<FanCurve>,
 }
 
+/// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
+#[derive(Clone, Default)]
+pub struct FanStatus {
+    pub cpu_temp:       Option<u32>,
+    pub gpu_temp:       Option<u32>,
+    pub channel_duties: Vec<(String, Option<u8>)>,
+    pub critical:       bool,
+    pub config_loaded:  bool,
+}
+
 pub struct FanDaemon {
     channels:          Vec<FanChannel>,
     channel_defs:      Vec<ChannelDef>,
@@ -103,6 +115,9 @@ pub struct FanDaemon {
     platforms:         Vec<HwMon>,
     cpus:              Vec<HwMon>,
     nvidia:            NvidiaState,
+    status:            Arc<StdMutex<FanStatus>>,
+    thermal_fallback:  bool,
+    thermal_cooldown:  u32,
 }
 
 const DEFAULT_HYSTERESIS_C: f32 = 3.0;
@@ -114,6 +129,7 @@ impl FanDaemon {
     /// Without one, fan control is disabled and the daemon only handles
     /// power profiles.
     pub fn new(nvidia: NvidiaState) -> Self {
+        let status = Arc::new(StdMutex::new(FanStatus::default()));
         let mut daemon = Self {
             channels: Vec::new(),
             channel_defs: Vec::new(),
@@ -129,10 +145,18 @@ impl FanDaemon {
             platforms: Vec::new(),
             cpus: Vec::new(),
             nvidia,
+            status,
+            thermal_fallback: false,
+            thermal_cooldown: 30,
         };
 
         daemon.apply_config(load_config());
         daemon
+    }
+
+    /// Shared status handle for D-Bus handlers to read.
+    pub fn status_handle(&self) -> Arc<StdMutex<FanStatus>> {
+        self.status.clone()
     }
 
     /// Apply a parsed config (or None for no-config fallback).
@@ -173,6 +197,12 @@ impl FanDaemon {
             self.platform_names = config.platform
                 .map(|name| vec![name])
                 .unwrap_or_default();
+            self.thermal_fallback = config.thermal_fallback.unwrap_or(false);
+            self.thermal_cooldown = config.thermal_cooldown.unwrap_or(30);
+
+            if let Ok(mut s) = self.status.lock() {
+                s.config_loaded = true;
+            }
         } else {
             log::warn!(
                 "no fan config found at {}, fan control disabled. \
@@ -384,9 +414,11 @@ impl FanDaemon {
     ///
     /// If any component crosses the critical threshold, all fans go to max
     /// duty regardless of their individual temperature source.
-    pub fn step(&mut self) {
+    ///
+    /// Returns true if critical temps were reached (used by thermal fallback).
+    pub fn step(&mut self) -> bool {
         if self.platform_names.is_empty() {
-            return;
+            return false;
         }
 
         if self.discover().is_ok() {
@@ -395,10 +427,13 @@ impl FanDaemon {
             let critical = cpu_temp.is_some_and(|t| t >= self.critical_cpu_temp)
                 || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
 
+            let mut duties = Vec::new();
+
             if critical {
                 log::warn!("critical temp reached, all fans to max");
                 for channel in &self.channels {
                     self.set_channel_duty(&channel.pwm, Some(255));
+                    duties.push((channel.pwm.clone(), Some(255)));
                 }
             } else {
                 for (i, channel) in self.channels.iter().enumerate() {
@@ -409,12 +444,10 @@ impl FanDaemon {
                         (Some(new_duty), Some(current_temp)) => {
                             let last = self.last_duties[i];
                             if new_duty >= last {
-                                // temp rising or steady, apply immediately
                                 self.last_duties[i] = new_duty;
                                 self.last_temps[i] = Some(current_temp);
                                 Some(new_duty)
                             } else if let Some(lt) = self.last_temps[i] {
-                                // temp falling, only reduce if we've dropped enough
                                 if lt.saturating_sub(current_temp) >= self.hysteresis {
                                     self.last_duties[i] = new_duty;
                                     self.last_temps[i] = Some(current_temp);
@@ -432,10 +465,28 @@ impl FanDaemon {
                     };
 
                     self.set_channel_duty(&channel.pwm, effective_duty);
+                    duties.push((channel.pwm.clone(), effective_duty));
                 }
             }
+
+            if let Ok(mut s) = self.status.lock() {
+                s.cpu_temp = cpu_temp;
+                s.gpu_temp = gpu_temp;
+                s.channel_duties = duties;
+                s.critical = critical;
+            }
+
+            return critical;
         }
+
+        false
     }
+
+    /// Whether thermal fallback is enabled in the config.
+    pub fn thermal_fallback_enabled(&self) -> bool { self.thermal_fallback }
+
+    /// Cooldown period in seconds before stepping back up after thermal fallback.
+    pub fn thermal_cooldown_secs(&self) -> u32 { self.thermal_cooldown }
 }
 
 impl Drop for FanDaemon {

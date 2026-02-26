@@ -130,6 +130,15 @@ fn validate_critical_temps(config: &FanConfig, issues: &mut Vec<Issue>) {
             )));
         }
     }
+
+    if let Some(cd) = config.thermal_cooldown {
+        if cd == 0 || cd > 300 {
+            issues.push(Issue::error(format!(
+                "thermal_cooldown {}s is outside reasonable range (1-300)",
+                cd,
+            )));
+        }
+    }
 }
 
 /// Validate channel configs, including per-channel curves.

@@ -41,8 +41,47 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
             Some("performance") => client.performance().await.map_err(zbus_error),
             _ => profile(&mut client).await.context("failed to get power profile"),
         },
+        Args::Status => status(&mut client).await.context("failed to get daemon status"),
         Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config => unreachable!(),
     }
+}
+
+/// Display current daemon state: profile, temps, and fan duties.
+async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
+    let profile = client.get_profile().await.ok();
+    let profile = profile.as_ref().map_or("?", |s| s.as_str());
+    println!("Profile: {}", profile);
+
+    if let Ok((cpu, gpu)) = client.get_temperatures().await {
+        if cpu >= 0 {
+            println!("CPU:     {:.1}C", cpu as f64 / 1000.0);
+        }
+        if gpu >= 0 {
+            println!("GPU:     {:.1}C", gpu as f64 / 1000.0);
+        }
+    }
+
+    if let Ok(duties) = client.get_fan_duties().await {
+        for (name, duty) in &duties {
+            if *duty >= 0 {
+                let pct = (*duty as f64 / 255.0) * 100.0;
+                println!("{}: {}/255 ({:.0}%)", name, duty, pct);
+            } else {
+                println!("{}: --", name);
+            }
+        }
+    }
+
+    if let Ok((config_loaded, critical)) = client.get_fan_config_status().await {
+        if !config_loaded {
+            println!("\nfan config not loaded");
+        }
+        if critical {
+            println!("\n!! CRITICAL TEMPERATURE !!");
+        }
+    }
+
+    Ok(())
 }
 
 fn zbus_error(why: zbus::Error) -> anyhow::Error { anyhow::anyhow!("{}", why) }
