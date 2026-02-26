@@ -23,14 +23,14 @@ jobs:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          pkg=$(ls vintagetechie-power-git-*-x86_64.pkg.tar.zst | head -1)
+          pkg=$(ls powercurve-git-*-x86_64.pkg.tar.zst | head -1)
 
           rm -rf /tmp/repo
           git clone --branch pages \
             "https://VintageTechie:${DEPLOY_TOKEN}@codeberg.org/VintageTechie/vintagetechie-arch-repo.git" \
             /tmp/repo
 
-          rm -f /tmp/repo/x86_64/vintagetechie-power-git-*.pkg.tar.zst
+          rm -f /tmp/repo/x86_64/powercurve-git-*.pkg.tar.zst
           cp "$pkg" /tmp/repo/x86_64/
 
           cd /tmp/repo/x86_64
@@ -40,5 +40,5 @@ jobs:
           git config user.name "VintageTechie"
           git config user.email "noreply@codeberg.org"
           git add -A
-          git commit -m "update vintagetechie-power-git to ${tag}"
+          git commit -m "update powercurve-git to ${tag}"
           git push origin pages

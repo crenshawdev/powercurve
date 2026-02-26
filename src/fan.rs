@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::{cmp, fs, io};
 use sysfs_class::{HwMon, SysClass};
 
-const CONFIG_PATH: &str = "/etc/vintagetechie-power/fan.toml";
+const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
 
 // -- TOML config deserialization types --
 
@@ -83,7 +83,7 @@ pub struct FanDaemon {
 impl FanDaemon {
     /// Build a new fan daemon with per-channel temperature routing.
     ///
-    /// Requires a config file at `/etc/vintagetechie-power/fan.toml`.
+    /// Requires a config file at `/etc/powercurve/fan.toml`.
     /// Without one, fan control is disabled and the daemon only handles
     /// power profiles.
     pub fn new(nvidia: NvidiaState) -> Self {
@@ -115,7 +115,7 @@ impl FanDaemon {
             } else {
                 log::warn!(
                     "no fan config found at {}, fan control disabled. \
-                     run `vintagetechie-power fan-detect --generate` to create one",
+                     run `powercurve fan-detect --generate` to create one",
                     CONFIG_PATH
                 );
                 (Vec::new(), 0, 0, Vec::new())

@@ -1,4 +1,4 @@
-# vintagetechie-power
+# powercurve
 
 A lightweight power management daemon for Linux desktops. Drop-in
 replacement for `power-profiles-daemon` with deeper hardware control
@@ -14,7 +14,7 @@ that talk to the `org.freedesktop.UPower.PowerProfiles` D-Bus interface
 Available from the [VintageTechie Arch repo](https://vintagetechie.codeberg.page/vintagetechie-arch-repo/):
 
 ```
-sudo pacman -S vintagetechie-power-git
+sudo pacman -S powercurve-git
 ```
 
 The package provides and conflicts with `power-profiles-daemon`, so
@@ -35,15 +35,15 @@ Three profiles, switchable via D-Bus or the CLI:
 Set a profile:
 
 ```
-vintagetechie-power profile quiet
-vintagetechie-power profile balanced
-vintagetechie-power profile performance
+powercurve profile quiet
+powercurve profile balanced
+powercurve profile performance
 ```
 
 Query the current profile:
 
 ```
-vintagetechie-power profile
+powercurve profile
 ```
 
 The active profile persists across restarts.
@@ -51,7 +51,7 @@ The active profile persists across restarts.
 ## Fan control
 
 The daemon controls fans through hwmon PWM outputs using a config file
-at `/etc/vintagetechie-power/fan.toml`. The Arch package generates this
+at `/etc/powercurve/fan.toml`. The Arch package generates this
 automatically on install by scanning hwmon devices for PWM-capable
 controllers. Without a config, fan control is disabled and the daemon
 only manages power profiles.
@@ -59,7 +59,7 @@ only manages power profiles.
 Run `fan-detect` to see what the daemon found on your hardware:
 
 ```
-vintagetechie-power fan-detect
+powercurve fan-detect
 ```
 
 This prints every hwmon device on the system with its temperature
@@ -69,7 +69,7 @@ To regenerate the config (or create one if it wasn't generated at
 install time):
 
 ```
-sudo vintagetechie-power fan-detect --generate > /etc/vintagetechie-power/fan.toml
+sudo powercurve fan-detect --generate > /etc/powercurve/fan.toml
 ```
 
 The `--generate` flag outputs only the TOML config with no device
@@ -164,7 +164,7 @@ sudo make install
 The daemon runs as a systemd service:
 
 ```
-sudo systemctl enable --now com.vintagetechie.PowerDaemon
+sudo systemctl enable --now com.vintagetechie.PowerCurve
 ```
 
 ## License

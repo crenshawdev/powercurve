@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #[zbus::dbus_proxy(
-    interface = "com.vintagetechie.PowerDaemon",
-    default_service = "com.vintagetechie.PowerDaemon",
-    default_path = "/com/vintagetechie/PowerDaemon"
+    interface = "com.vintagetechie.PowerCurve",
+    default_service = "com.vintagetechie.PowerCurve",
+    default_path = "/com/vintagetechie/PowerCurve"
 )]
-trait PowerDaemon {
+trait PowerCurve {
     /// Quiet method
     fn quiet(&self) -> zbus::Result<()>;
 

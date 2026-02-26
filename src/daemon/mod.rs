@@ -150,7 +150,7 @@ impl PowerService {
     }
 }
 
-#[zbus::dbus_interface(name = "com.vintagetechie.PowerDaemon")]
+#[zbus::dbus_interface(name = "com.vintagetechie.PowerCurve")]
 impl PowerService {
     async fn quiet(
         &mut self,
@@ -443,7 +443,7 @@ pub async fn daemon() -> anyhow::Result<()> {
         .context("unable to serve")?
         .build()
         .await
-        .context("unable to create system service for com.vintagetechie.PowerDaemon")?;
+        .context("unable to create system service for com.vintagetechie.PowerCurve")?;
 
     power_service.0.lock().await.connections =
         Some((connection.clone(), upp_connection, hadess_connection));

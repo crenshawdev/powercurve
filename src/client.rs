@@ -6,9 +6,9 @@ use crate::args::Args;
 use anyhow::Context;
 use intel_pstate::PState;
 use std::io;
-use vintagetechie_power_zbus::PowerDaemonProxy;
+use powercurve_zbus::PowerCurveProxy;
 
-async fn profile(client: &mut PowerDaemonProxy<'_>) -> io::Result<()> {
+async fn profile(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     let profile = client.get_profile().await.ok();
     let profile = profile.as_ref().map_or("?", |s| s.as_str());
     println!("Power Profile: {}", profile);
@@ -30,9 +30,9 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
     let connection =
         zbus::Connection::system().await.context("failed to create zbus system connection")?;
 
-    let mut client = PowerDaemonProxy::new(&connection)
+    let mut client = PowerCurveProxy::new(&connection)
         .await
-        .context("failed to connect to vintagetechie-power daemon")?;
+        .context("failed to connect to powercurve daemon")?;
 
     match args {
         Args::Profile { profile: name } => match name.as_deref() {
