@@ -57,9 +57,12 @@ async fn signal_handling() {
 }
 
 /// Listen for SIGHUP and flag a config reload on each occurrence.
+///
+/// Runs until cancelled by the caller (via tokio::select). The loop
+/// itself never checks CONTINUE since cancellation handles shutdown.
 async fn sighup_handling() {
     let mut hup = signal(SignalKind::hangup()).unwrap();
-    while CONTINUE.load(Ordering::SeqCst) {
+    loop {
         hup.recv().await;
         log::info!("caught SIGHUP, scheduling config reload");
         RELOAD.store(true, Ordering::SeqCst);
@@ -605,10 +608,11 @@ pub async fn daemon() -> anyhow::Result<()> {
     };
 
     log::info!("handling dbus requests");
-    futures_lite::future::zip(signal_handling_fut, async {
-        futures_lite::future::zip(sighup_fut, main_loop).await;
-    })
-    .await;
+    tokio::select! {
+        _ = signal_handling_fut => {},
+        _ = sighup_fut => {},
+        _ = main_loop => {},
+    };
 
     log::info!("daemon exited from loop");
     Ok(())
