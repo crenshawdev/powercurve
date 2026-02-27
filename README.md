@@ -253,8 +253,34 @@ Check the current state of the daemon:
 powercurve status
 ```
 
-This shows the active profile, CPU/GPU temperatures, and per-channel
-PWM duties without requiring root.
+This shows the active profile, CPU/GPU temperatures, per-channel PWM
+duties, and the active fan curve for each channel. Doesn't require root.
+
+Check the version:
+
+```
+powercurve version
+```
+
+### Temporary fan overrides
+
+For testing and tuning, you can temporarily override a fan channel's
+duty cycle without changing the config:
+
+```
+powercurve fan pwm3 50
+```
+
+This sets pwm3 to 50% immediately. The override persists until you
+clear it or switch profiles:
+
+```
+powercurve fan pwm3 clear
+```
+
+Overrides show up in `powercurve status` with an `[override]` tag
+next to the affected channel. Switching profiles clears all overrides
+automatically.
 
 For desktop notifications on profile switches and thermal events, run
 the monitor as a user service:

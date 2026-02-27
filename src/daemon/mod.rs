@@ -264,6 +264,52 @@ impl PowerService {
         Ok((status.config_loaded, status.critical))
     }
 
+    /// Return the active curve for each channel as (name, [(temp_c, duty_pct)]) pairs.
+    #[dbus_interface(out_args("curves"))]
+    async fn get_fan_curves(&self) -> zbus::fdo::Result<Vec<(String, Vec<(f64, f64)>)>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.channel_curves.iter().map(|(name, pts)| {
+            (name.clone(), pts.iter().map(|(t, d)| (*t as f64, *d as f64)).collect())
+        }).collect())
+    }
+
+    /// Return currently active fan overrides as (channel, duty_percent) pairs.
+    #[dbus_interface(out_args("overrides"))]
+    async fn get_fan_overrides(&self) -> zbus::fdo::Result<Vec<(String, u8)>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.overrides.iter().map(|(k, v)| {
+            (k.clone(), (((*v as u16) * 100) / 255) as u8)
+        }).collect())
+    }
+
+    /// Temporarily override a fan channel's duty cycle. Lasts until the
+    /// next profile change or until explicitly cleared.
+    async fn set_fan_override(
+        &self,
+        channel: &str,
+        duty_percent: u8,
+    ) -> zbus::fdo::Result<()> {
+        let duty_byte = ((duty_percent.min(100) as u16) * 255 / 100) as u8;
+        let mut status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        status.overrides.insert(channel.to_string(), duty_byte);
+        Ok(())
+    }
+
+    /// Clear a temporary fan override, returning the channel to curve control.
+    async fn clear_fan_override(&self, channel: &str) -> zbus::fdo::Result<()> {
+        let mut status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        status.overrides.remove(channel);
+        Ok(())
+    }
+
     #[dbus_interface(signal)]
     async fn power_profile_switch(
         context: &zbus::SignalContext<'_>,

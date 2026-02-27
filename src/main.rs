@@ -31,6 +31,10 @@ fn main() {
                 Err(anyhow::anyhow!("must be run as root"))
             }
         }
+        Args::Version => {
+            println!("powercurve {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Args::FanDetect { generate } => fan_detect::run(generate),
         Args::Config => config_check::run(),
         Args::Monitor => monitor::run(),
