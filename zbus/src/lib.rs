@@ -47,6 +47,9 @@ trait PowerCurve {
     /// Get current RPM readings as (channel_name, rpm) pairs. -1 = no sensor.
     fn get_fan_rpms(&self) -> zbus::Result<Vec<(String, i32)>>;
 
+    /// Get names of channels in passthrough mode.
+    fn get_passthrough_channels(&self) -> zbus::Result<Vec<String>>;
+
     /// Get names of channels currently detected as stalled.
     fn get_stalled_fans(&self) -> zbus::Result<Vec<String>>;
 

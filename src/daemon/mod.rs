@@ -334,6 +334,15 @@ impl PowerService {
         }).collect())
     }
 
+    /// Return the names of channels in passthrough mode.
+    #[dbus_interface(out_args("channels"))]
+    async fn get_passthrough_channels(&self) -> zbus::fdo::Result<Vec<String>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.passthrough.clone())
+    }
+
     /// Return the names of any channels currently detected as stalled.
     #[dbus_interface(out_args("stalled"))]
     async fn get_stalled_fans(&self) -> zbus::fdo::Result<Vec<String>> {

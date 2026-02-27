@@ -51,6 +51,10 @@
       <arg name="rpms" type="a(si)" direction="out"/>
     </method>
 
+    <method name="GetPassthroughChannels">
+      <arg name="channels" type="as" direction="out"/>
+    </method>
+
     <method name="GetStalledFans">
       <arg name="stalled" type="as" direction="out"/>
     </method>
