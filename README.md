@@ -284,6 +284,24 @@ RPM sensor is mapped by index (pwm1 reads fan1_input from the
 platform hwmon). `powercurve status` shows current RPM and a
 `[STALLED]` tag on affected channels.
 
+### Passthrough mode
+
+Some fans are better left under BIOS or firmware control. Setting
+`passthrough = true` on a channel tells the daemon to skip it entirely,
+no duty writes, no RPM reads, no curve evaluation. The channel keeps
+whatever control mode the system firmware set.
+
+```toml
+[[channels]]
+pwm = "pwm4"
+source = "all"
+passthrough = true
+```
+
+Passthrough channels show up in `powercurve status` as `[passthrough]`
+and are excluded from curves, overrides, and stall detection. Useful
+for chipset fans or channels with no connected hardware.
+
 ## Monitoring and status
 
 Check the current state of the daemon:

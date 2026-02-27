@@ -1,6 +1,6 @@
 [package]
 name = "powercurve"
-version = "0.1.0-beta.6"
+version = "0.1.0-rc.1"
 authors = ["John Crenshaw"]
 edition = "2021"
 rust-version = "1.93.0"
@@ -50,4 +50,8 @@ assets = [
     ["data/com.vintagetechie.PowerCurve.xml", "usr/share/dbus-1/interfaces/", "644"],
     ["data/com.vintagetechie.PowerCurve.service", "usr/lib/systemd/system/", "644"],
     ["data/powercurve-monitor.service", "usr/lib/systemd/user/", "644"],
+    ["man/powercurve.1", "usr/share/man/man1/", "644"],
+    ["examples/fan-simple.toml", "usr/share/doc/powercurve/examples/", "644"],
+    ["examples/fan-desktop.toml", "usr/share/doc/powercurve/examples/", "644"],
+    ["examples/fan-profiles.toml", "usr/share/doc/powercurve/examples/", "644"],
 ]

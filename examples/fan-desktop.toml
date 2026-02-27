@@ -1,0 +1,49 @@
+# Desktop tower with separate CPU and GPU fans. The intake fan tracks the
+# hottest sensor to keep airflow up regardless of which component is working.
+
+critical_cpu_temp = 85
+critical_gpu_temp = 80
+
+# 3C hysteresis prevents rapid duty changes when temps hover near a
+# curve point. The default is 3C, shown here for clarity.
+hysteresis = 3.0
+
+# Smooth curve with an always-on 10% floor to avoid start/stop cycling.
+[[curve]]
+temp = 30.0
+duty = 10
+
+[[curve]]
+temp = 40.0
+duty = 18
+
+[[curve]]
+temp = 50.0
+duty = 30
+
+[[curve]]
+temp = 58.0
+duty = 45
+
+[[curve]]
+temp = 66.0
+duty = 68
+
+[[curve]]
+temp = 75.0
+duty = 100
+
+# CPU fan tracks CPU temps only.
+[[channels]]
+pwm = "pwm1"
+source = "cpu"
+
+# Case intake tracks the hottest sensor.
+[[channels]]
+pwm = "pwm2"
+source = "all"
+
+# GPU fan tracks GPU temps only.
+[[channels]]
+pwm = "pwm3"
+source = "gpu"

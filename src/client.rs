@@ -74,9 +74,14 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     let floors: Vec<(String, i32)> = client.get_fan_min_duties().await.unwrap_or_default();
     let rpms: Vec<(String, i32)> = client.get_fan_rpms().await.unwrap_or_default();
     let stalled: Vec<String> = client.get_stalled_fans().await.unwrap_or_default();
+    let passthrough: Vec<String> = client.get_passthrough_channels().await.unwrap_or_default();
 
     if let Ok(duties) = client.get_fan_duties().await {
         for (name, duty) in &duties {
+            if passthrough.iter().any(|p| p == name) {
+                println!("{}: [passthrough]", name);
+                continue;
+            }
             let override_tag = overrides.iter()
                 .find(|(k, _)| k == name)
                 .map(|(_, pct)| format!(" [override {}%]", pct))

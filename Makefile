@@ -37,6 +37,9 @@ install: all
 	install -D -m 0644 "data/$(ID).xml" "$(DESTDIR)$(datadir)/dbus-1/interfaces/$(ID).xml"
 	install -D -m 0644 "data/powercurve-monitor.service" "$(DESTDIR)$(libdir)/systemd/user/powercurve-monitor.service"
 	install -D -m 0755 "target/release/$(BIN)" "$(DESTDIR)$(bindir)/$(BIN)"
+	install -D -m 0644 "man/$(BIN).1" "$(DESTDIR)$(datadir)/man/man1/$(BIN).1"
+	install -d "$(DESTDIR)$(datadir)/doc/$(BIN)/examples"
+	install -m 0644 examples/fan-*.toml "$(DESTDIR)$(datadir)/doc/$(BIN)/examples/"
 
 uninstall:
 	rm -f "$(DESTDIR)$(bindir)/$(BIN)"
@@ -44,6 +47,8 @@ uninstall:
 	rm -f "$(DESTDIR)$(datadir)/dbus-1/system.d/$(ID).conf"
 	rm -f "$(DESTDIR)$(libdir)/systemd/system/$(ID).service"
 	rm -f "$(DESTDIR)$(libdir)/systemd/user/powercurve-monitor.service"
+	rm -f "$(DESTDIR)$(datadir)/man/man1/$(BIN).1"
+	rm -rf "$(DESTDIR)$(datadir)/doc/$(BIN)"
 
 update:
 	cargo update

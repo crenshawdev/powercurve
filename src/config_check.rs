@@ -148,6 +148,18 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
     }
 
     for (i, ch) in config.channels.iter().enumerate() {
+        if ch.passthrough == Some(true) {
+            if ch.curve.is_some() || ch.profiles.is_some() || ch.min_duty.is_some()
+                || ch.stall_detect.is_some()
+            {
+                issues.push(Issue::warning(format!(
+                    "channel {} ({}): passthrough is set, curve/profile/min_duty/stall settings are ignored",
+                    i, ch.pwm,
+                )));
+            }
+            continue;
+        }
+
         let valid_sources = ["cpu", "gpu", "all"];
         if !valid_sources.contains(&ch.source.as_str()) {
             issues.push(Issue::warning(format!(
@@ -280,7 +292,7 @@ mod tests {
                 CurvePoint { temp: 75.0, duty: 100.0 },
             ],
             channels:          vec![
-                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), min_duty: None, stall_detect: None, stall_threshold: None, curve: None, profiles: None},
+                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), min_duty: None, stall_detect: None, stall_threshold: None, passthrough: None, curve: None, profiles: None},
             ],
             profiles:          None,
         }
@@ -401,7 +413,7 @@ mod tests {
     fn unknown_source_is_warning() {
         let mut config = valid_config();
         config.channels = vec![
-            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), min_duty: None, stall_detect: None, stall_threshold: None, curve: None, profiles: None},
+            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), min_duty: None, stall_detect: None, stall_threshold: None, passthrough: None, curve: None, profiles: None},
         ];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
@@ -423,6 +435,7 @@ mod tests {
                 min_duty: None,
                 stall_detect: None,
                 stall_threshold: None,
+                passthrough: None,
                 curve: None,
                 profiles: Some(profiles),
             },
@@ -443,6 +456,7 @@ mod tests {
                 min_duty: Some(150.0),
                 stall_detect: None,
                 stall_threshold: None,
+                passthrough: None,
                 curve: None,
                 profiles: None,
             },
@@ -463,6 +477,7 @@ mod tests {
                 min_duty: Some(15.0),
                 stall_detect: None,
                 stall_threshold: None,
+                passthrough: None,
                 curve: None,
                 profiles: None,
             },
@@ -489,6 +504,7 @@ mod tests {
                 min_duty: None,
                 stall_detect: None,
                 stall_threshold: None,
+                passthrough: None,
                 curve: None,
                 profiles: Some(profiles),
             },
@@ -509,6 +525,7 @@ mod tests {
                 min_duty: None,
                 stall_detect: Some(true),
                 stall_threshold: Some(0),
+                passthrough: None,
                 curve: None,
                 profiles: None,
             },
@@ -534,6 +551,7 @@ mod tests {
                 min_duty: None,
                 stall_detect: Some(true),
                 stall_threshold: Some(5),
+                passthrough: None,
                 curve: None,
                 profiles: None,
             },
@@ -541,5 +559,47 @@ mod tests {
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert!(errors(&issues).is_empty());
+    }
+
+    #[test]
+    fn passthrough_skips_validation() {
+        let mut config = valid_config();
+        config.channels = vec![
+            ChannelConfig {
+                pwm: "pwm4".into(),
+                source: "all".into(),
+                min_duty: None,
+                stall_detect: None,
+                stall_threshold: None,
+                passthrough: Some(true),
+                curve: None,
+                profiles: None,
+            },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert!(errors(&issues).is_empty());
+        assert!(warnings(&issues).is_empty());
+    }
+
+    #[test]
+    fn passthrough_warns_on_ignored_settings() {
+        let mut config = valid_config();
+        config.channels = vec![
+            ChannelConfig {
+                pwm: "pwm4".into(),
+                source: "all".into(),
+                min_duty: Some(25.0),
+                stall_detect: None,
+                stall_threshold: None,
+                passthrough: Some(true),
+                curve: None,
+                profiles: None,
+            },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert_eq!(warnings(&issues).len(), 1);
+        assert!(warnings(&issues)[0].contains("passthrough"));
     }
 }

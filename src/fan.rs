@@ -59,6 +59,7 @@ pub(crate) struct ChannelConfig {
     pub min_duty:        Option<f32>,
     pub stall_detect:    Option<bool>,
     pub stall_threshold: Option<u32>,
+    pub passthrough:     Option<bool>,
     pub curve:           Option<Vec<CurvePoint>>,
     pub profiles:        Option<HashMap<String, ChannelProfileConfig>>,
 }
@@ -93,6 +94,7 @@ pub struct FanChannel {
     pub min_duty:        Option<u8>,
     pub stall_detect:    bool,
     pub stall_threshold: u32,
+    pub passthrough:     bool,
 }
 
 /// Stored per-channel definition from config, used to rebuild curves
@@ -106,6 +108,7 @@ struct ChannelDef {
     min_duty_byte:   Option<u8>,
     stall_detect:    bool,
     stall_threshold: u32,
+    passthrough:     bool,
 }
 
 /// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
@@ -119,6 +122,7 @@ pub struct FanStatus {
     pub min_duties:     Vec<(String, Option<u8>)>,
     pub rpms:           Vec<(String, Option<u32>)>,
     pub stalled:        Vec<String>,
+    pub passthrough:    Vec<String>,
     pub critical:       bool,
     pub config_loaded:  bool,
 }
@@ -214,6 +218,7 @@ impl FanDaemon {
                         min_duty_byte,
                         stall_detect:    ch.stall_detect.unwrap_or(false),
                         stall_threshold: ch.stall_threshold.unwrap_or(3),
+                        passthrough:     ch.passthrough.unwrap_or(false),
                     }
                 })
                 .collect();
@@ -226,6 +231,7 @@ impl FanDaemon {
                     min_duty:        def.min_duty_byte,
                     stall_detect:    def.stall_detect,
                     stall_threshold: def.stall_threshold,
+                    passthrough:     def.passthrough,
                 }
             }).collect();
 
@@ -339,6 +345,7 @@ impl FanDaemon {
                 ch.min_duty = def.min_duty_byte;
                 ch.stall_detect = def.stall_detect;
                 ch.stall_threshold = def.stall_threshold;
+                ch.passthrough = def.passthrough;
             }
         }
 
@@ -512,6 +519,11 @@ impl FanDaemon {
             if critical {
                 log::warn!("critical temp reached, all fans to max");
                 for channel in &self.channels {
+                    if channel.passthrough {
+                        duties.push((channel.pwm.clone(), None));
+                        rpms.push((channel.pwm.clone(), None));
+                        continue;
+                    }
                     self.set_channel_duty(&channel.pwm, Some(255));
                     duties.push((channel.pwm.clone(), Some(255)));
                     rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
@@ -519,6 +531,13 @@ impl FanDaemon {
                 self.stall_counts.fill(0);
             } else {
                 for (i, channel) in self.channels.iter().enumerate() {
+                    // Passthrough channels are left under BIOS/firmware control.
+                    if channel.passthrough {
+                        duties.push((channel.pwm.clone(), None));
+                        rpms.push((channel.pwm.clone(), None));
+                        continue;
+                    }
+
                     // Temporary override bypasses curve evaluation entirely.
                     let override_duty = self.status.lock().ok()
                         .and_then(|s| s.overrides.get(&channel.pwm).copied());
@@ -610,13 +629,19 @@ impl FanDaemon {
                 s.gpu_temp = gpu_temp;
                 s.channel_duties = duties;
                 s.channel_curves = self.channels.iter()
+                    .filter(|ch| !ch.passthrough)
                     .map(|ch| (ch.pwm.clone(), ch.curve.to_display_points()))
                     .collect();
                 s.min_duties = self.channels.iter()
+                    .filter(|ch| !ch.passthrough)
                     .map(|ch| (ch.pwm.clone(), ch.min_duty))
                     .collect();
                 s.rpms = rpms;
                 s.stalled = stalled;
+                s.passthrough = self.channels.iter()
+                    .filter(|ch| ch.passthrough)
+                    .map(|ch| ch.pwm.clone())
+                    .collect();
                 s.critical = critical;
             }
 
@@ -639,6 +664,7 @@ impl Drop for FanDaemon {
             return;
         }
         for channel in &self.channels {
+            if channel.passthrough { continue; }
             self.set_channel_duty(&channel.pwm, None);
         }
     }
@@ -1268,5 +1294,30 @@ mod tests {
         // Verify the fallback constant is ~15%
         let pct = (FanDaemon::STALL_FALLBACK_DUTY as f32 / 255.0) * 100.0;
         assert!(pct > 14.0 && pct < 16.0);
+    }
+
+    #[test]
+    fn config_passthrough() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 40.0
+            duty = 15
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+
+            [[channels]]
+            pwm = "pwm4"
+            source = "all"
+            passthrough = true
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.channels[0].passthrough.is_none());
+        assert_eq!(config.channels[1].passthrough, Some(true));
     }
 }
