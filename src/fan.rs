@@ -56,6 +56,7 @@ pub(crate) struct ChannelProfileConfig {
 pub(crate) struct ChannelConfig {
     pub pwm:      String,
     pub source:   String,
+    pub min_duty: Option<f32>,
     pub curve:    Option<Vec<CurvePoint>>,
     pub profiles: Option<HashMap<String, ChannelProfileConfig>>,
 }
@@ -84,9 +85,10 @@ pub enum TempSource {
 /// Maps a single PWM output to a temperature source and fan curve.
 #[derive(Clone, Debug)]
 pub struct FanChannel {
-    pub pwm:    String,
-    pub source: TempSource,
-    pub curve:  FanCurve,
+    pub pwm:      String,
+    pub source:   TempSource,
+    pub curve:    FanCurve,
+    pub min_duty: Option<u8>,
 }
 
 /// Stored per-channel definition from config, used to rebuild curves
@@ -97,6 +99,7 @@ struct ChannelDef {
     source:         TempSource,
     override_curve: Option<FanCurve>,
     profile_curves: HashMap<String, FanCurve>,
+    min_duty_byte:  Option<u8>,
 }
 
 /// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
@@ -107,6 +110,7 @@ pub struct FanStatus {
     pub channel_duties: Vec<(String, Option<u8>)>,
     pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
     pub overrides:      HashMap<String, u8>,
+    pub min_duties:     Vec<(String, Option<u8>)>,
     pub critical:       bool,
     pub config_loaded:  bool,
 }
@@ -189,20 +193,25 @@ impl FanDaemon {
                             .map(|(name, pc)| (name.to_lowercase(), build_curve(&pc.curve)))
                             .collect())
                         .unwrap_or_default();
+                    let min_duty_byte = ch.min_duty.map(|pct| {
+                        ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8
+                    });
                     ChannelDef {
                         pwm:            ch.pwm.clone(),
                         source:         parse_temp_source(&ch.source),
                         override_curve: ch.curve.as_deref().map(build_curve),
                         profile_curves,
+                        min_duty_byte,
                     }
                 })
                 .collect();
 
             self.channels = self.channel_defs.iter().map(|def| {
                 FanChannel {
-                    pwm:    def.pwm.clone(),
-                    source: def.source,
-                    curve:  def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
+                    pwm:      def.pwm.clone(),
+                    source:   def.source,
+                    curve:    def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
+                    min_duty: def.min_duty_byte,
                 }
             }).collect();
 
@@ -312,6 +321,7 @@ impl FanDaemon {
                     .or(def.override_curve.as_ref())
                     .unwrap_or(global_curve)
                     .clone();
+                ch.min_duty = def.min_duty_byte;
             }
         }
 
@@ -509,8 +519,14 @@ impl FanDaemon {
                         (duty, _) => duty,
                     };
 
-                    self.set_channel_duty(&channel.pwm, effective_duty);
-                    duties.push((channel.pwm.clone(), effective_duty));
+                    // Apply minimum duty floor if configured.
+                    let floored_duty = match (effective_duty, channel.min_duty) {
+                        (Some(d), Some(floor)) => Some(d.max(floor)),
+                        (None, Some(floor))    => Some(floor),
+                        (duty, None)           => duty,
+                    };
+                    self.set_channel_duty(&channel.pwm, floored_duty);
+                    duties.push((channel.pwm.clone(), floored_duty));
                 }
             }
 
@@ -520,6 +536,9 @@ impl FanDaemon {
                 s.channel_duties = duties;
                 s.channel_curves = self.channels.iter()
                     .map(|ch| (ch.pwm.clone(), ch.curve.to_display_points()))
+                    .collect();
+                s.min_duties = self.channels.iter()
+                    .map(|ch| (ch.pwm.clone(), ch.min_duty))
                     .collect();
                 s.critical = critical;
             }
@@ -1019,6 +1038,63 @@ mod tests {
         assert_ne!(ch_default_50, ch_quiet_50);
         assert!(ch_quiet_50 < ch_default_50, "quiet should be lower duty than default");
         assert!(ch_perf_50 > ch_default_50, "performance should be higher duty than default");
+    }
+
+    #[test]
+    fn config_min_duty() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 40.0
+            duty = 15
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+            min_duty = 10.0
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.channels[0].min_duty, Some(10.0));
+    }
+
+    #[test]
+    fn config_min_duty_absent() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 40.0
+            duty = 15
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.channels[0].min_duty.is_none());
+    }
+
+    #[test]
+    fn min_duty_byte_conversion() {
+        // 15% of 255 = 38.25, rounds to 38
+        let pct = 15.0f32;
+        let byte = ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8;
+        assert_eq!(byte, 38);
+
+        // 100% = 255
+        let pct = 100.0f32;
+        let byte = ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8;
+        assert_eq!(byte, 255);
+
+        // 0% = 0
+        let pct = 0.0f32;
+        let byte = ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8;
+        assert_eq!(byte, 0);
     }
 
     #[test]

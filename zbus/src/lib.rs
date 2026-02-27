@@ -41,6 +41,9 @@ trait PowerCurve {
     /// Clear a temporary fan override.
     fn clear_fan_override(&self, channel: &str) -> zbus::Result<()>;
 
+    /// Get minimum duty floors as (channel_name, duty_byte) pairs. -1 = no floor.
+    fn get_fan_min_duties(&self) -> zbus::Result<Vec<(String, i32)>>;
+
     /// PowerProfileSwitch signal
     #[dbus_proxy(signal)]
     fn power_profile_switch(&self, profile: &str) -> zbus::Result<()>;

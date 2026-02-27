@@ -68,6 +68,7 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     }
 
     let overrides: Vec<(String, u8)> = client.get_fan_overrides().await.unwrap_or_default();
+    let floors: Vec<(String, i32)> = client.get_fan_min_duties().await.unwrap_or_default();
 
     if let Ok(duties) = client.get_fan_duties().await {
         for (name, duty) in &duties {
@@ -75,11 +76,19 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
                 .find(|(k, _)| k == name)
                 .map(|(_, pct)| format!(" [override {}%]", pct))
                 .unwrap_or_default();
+            let floor_tag = floors.iter()
+                .find(|(k, _)| k == name)
+                .and_then(|(_, d)| if *d >= 0 {
+                    Some(format!(" [floor {:.0}%]", (*d as f64 / 255.0) * 100.0))
+                } else {
+                    None
+                })
+                .unwrap_or_default();
             if *duty >= 0 {
                 let pct = (*duty as f64 / 255.0) * 100.0;
-                println!("{}: {}/255 ({:.0}%){}", name, duty, pct, override_tag);
+                println!("{}: {}/255 ({:.0}%){}{}", name, duty, pct, override_tag, floor_tag);
             } else {
-                println!("{}: --{}", name, override_tag);
+                println!("{}: --{}{}", name, override_tag, floor_tag);
             }
         }
     }

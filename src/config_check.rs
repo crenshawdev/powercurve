@@ -156,6 +156,15 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             )));
         }
 
+        if let Some(min) = ch.min_duty {
+            if !(0.0..=100.0).contains(&min) {
+                issues.push(Issue::error(format!(
+                    "channel {} ({}): min_duty {:.1} is outside 0-100 range",
+                    i, ch.pwm, min,
+                )));
+            }
+        }
+
         if let Some(ref curve) = ch.curve {
             let label = format!("channel {} ({})", i, ch.pwm);
             validate_curve(curve, &label, issues);
@@ -262,7 +271,7 @@ mod tests {
                 CurvePoint { temp: 75.0, duty: 100.0 },
             ],
             channels:          vec![
-                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), curve: None, profiles: None },
+                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), min_duty: None, curve: None, profiles: None },
             ],
             profiles:          None,
         }
@@ -383,7 +392,7 @@ mod tests {
     fn unknown_source_is_warning() {
         let mut config = valid_config();
         config.channels = vec![
-            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), curve: None, profiles: None },
+            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), min_duty: None, curve: None, profiles: None },
         ];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
@@ -402,6 +411,7 @@ mod tests {
             ChannelConfig {
                 pwm: "pwm1".into(),
                 source: "cpu".into(),
+                min_duty: None,
                 curve: None,
                 profiles: Some(profiles),
             },
@@ -410,6 +420,41 @@ mod tests {
         validate_channels(&config, &mut issues);
         assert_eq!(warnings(&issues).len(), 1);
         assert!(warnings(&issues)[0].contains("unknown profile name"));
+    }
+
+    #[test]
+    fn min_duty_out_of_range() {
+        let mut config = valid_config();
+        config.channels = vec![
+            ChannelConfig {
+                pwm: "pwm1".into(),
+                source: "cpu".into(),
+                min_duty: Some(150.0),
+                curve: None,
+                profiles: None,
+            },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("min_duty"));
+    }
+
+    #[test]
+    fn min_duty_valid() {
+        let mut config = valid_config();
+        config.channels = vec![
+            ChannelConfig {
+                pwm: "pwm1".into(),
+                source: "cpu".into(),
+                min_duty: Some(15.0),
+                curve: None,
+                profiles: None,
+            },
+        ];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert!(errors(&issues).is_empty());
     }
 
     #[test]
@@ -426,6 +471,7 @@ mod tests {
             ChannelConfig {
                 pwm: "pwm1".into(),
                 source: "cpu".into(),
+                min_duty: None,
                 curve: None,
                 profiles: Some(profiles),
             },
