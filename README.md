@@ -263,6 +263,27 @@ off. Overrides bypass the floor since they're explicitly set by the
 user. The value is a percentage (0-100), and channels without
 `min_duty` can still stop when cool.
 
+### Stall detection
+
+If you don't know your fan's stall point up front, stall detection
+catches it at runtime by reading the tachometer. When a channel is
+writing duty > 0 but the RPM sensor reads 0 for several consecutive
+cycles, the daemon bumps duty to `min_duty` (or 15% if no floor is
+set) to restart the fan.
+
+```toml
+[[channels]]
+pwm = "pwm1"
+source = "cpu"
+stall_detect = true      # enable RPM-based stall detection
+stall_threshold = 3      # consecutive zero-RPM reads before bump (default: 3)
+```
+
+Not all fans have tachometers, so this is opt-in per channel. The
+RPM sensor is mapped by index (pwm1 reads fan1_input from the
+platform hwmon). `powercurve status` shows current RPM and a
+`[STALLED]` tag on affected channels.
+
 ## Monitoring and status
 
 Check the current state of the daemon:

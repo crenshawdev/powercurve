@@ -44,6 +44,12 @@ trait PowerCurve {
     /// Get minimum duty floors as (channel_name, duty_byte) pairs. -1 = no floor.
     fn get_fan_min_duties(&self) -> zbus::Result<Vec<(String, i32)>>;
 
+    /// Get current RPM readings as (channel_name, rpm) pairs. -1 = no sensor.
+    fn get_fan_rpms(&self) -> zbus::Result<Vec<(String, i32)>>;
+
+    /// Get names of channels currently detected as stalled.
+    fn get_stalled_fans(&self) -> zbus::Result<Vec<String>>;
+
     /// PowerProfileSwitch signal
     #[dbus_proxy(signal)]
     fn power_profile_switch(&self, profile: &str) -> zbus::Result<()>;
