@@ -26,6 +26,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let mut profile_stream = proxy.receive_power_profile_switch().await?;
     let mut thermal_stream = proxy.receive_thermal_event().await?;
+    let mut stall_stream = proxy.receive_stall_event().await?;
 
     println!("monitoring powercurve events (ctrl-c to stop)");
 
@@ -73,6 +74,15 @@ pub async fn run() -> anyhow::Result<()> {
 
                     println!("{}: {}", summary, body);
                     let _ = notify(&session, summary, &body).await;
+                }
+            }
+            Some(signal) = stall_stream.next() => {
+                if let Ok(args) = signal.args() {
+                    let channel = args.channel();
+                    let duty = *args.duty();
+                    let body = format!("{} stalled at {}% duty (0 RPM)", channel, duty);
+                    println!("stall: {}", body);
+                    let _ = notify(&session, "Fan Stall Detected", &body).await;
                 }
             }
             else => break,

@@ -357,6 +357,14 @@ impl PowerService {
         temp_millideg: i64,
         profile: &str,
     ) -> zbus::Result<()>;
+
+    /// Emitted when a fan channel stalls (0 RPM while duty > 0).
+    #[dbus_interface(signal)]
+    async fn stall_event(
+        context: &zbus::SignalContext<'_>,
+        channel: &str,
+        duty: u8,
+    ) -> zbus::Result<()>;
 }
 
 struct UPowerPowerProfiles(Arc<Mutex<PowerDaemon>>);
@@ -601,6 +609,7 @@ pub async fn daemon() -> anyhow::Result<()> {
         let mut fallback_pending = false;
         let mut original_profile: Option<String> = None;
         let mut cool_ticks: u32 = 0;
+        let mut stall_signalled: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
@@ -685,6 +694,26 @@ pub async fn daemon() -> anyhow::Result<()> {
                     cool_ticks = 0;
                 }
             }
+
+            // Emit stall signals for newly stalled channels.
+            let (current_stalled, current_duties) = fan_daemon.status_handle().lock()
+                .map(|s| (s.stalled.clone(), s.channel_duties.clone()))
+                .unwrap_or_default();
+
+            for ch in &current_stalled {
+                if stall_signalled.insert(ch.clone()) {
+                    let duty_pct = current_duties.iter()
+                        .find(|(name, _)| name == ch)
+                        .and_then(|(_, d)| d.map(|v| ((v as u16 * 100) / 255) as u8))
+                        .unwrap_or(0);
+                    let _ = PowerService::stall_event(
+                        &thermal_context, ch, duty_pct,
+                    ).await;
+                }
+            }
+
+            // Clear signal tracking for channels that recovered.
+            stall_signalled.retain(|ch| current_stalled.contains(ch));
         }
     };
 
