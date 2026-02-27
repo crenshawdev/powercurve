@@ -10,8 +10,8 @@ vendor.tar.xz
 
 # makepkg build artifacts
 /pkg/
-/src/
 /powercurve/
+/src/powercurve/
 /system76-power-custom/
 *.pkg.tar.zst
 *.pkg.tar.xz
