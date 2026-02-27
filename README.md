@@ -205,6 +205,12 @@ Temperatures are in Celsius, duty is a percentage (0-100). The daemon
 interpolates linearly between curve points, so you don't need a point
 at every degree.
 
+The `examples/` directory has ready-to-use configs at different
+complexity levels: `fan-simple.toml` for a single fan with a shared
+curve, `fan-desktop.toml` for a typical three-fan desktop with
+hysteresis, and `fan-profiles.toml` showing everything including
+per-channel per-profile curves, stall detection, and passthrough.
+
 ### Config reference
 
 | Field | Required | Description |
@@ -350,11 +356,16 @@ actually spins:
 powercurve fan-test pwm1
 ```
 
-For finer resolution or a different starting point:
+For finer resolution, a different starting point, or longer settle
+time between steps:
 
 ```
-powercurve fan-test pwm3 --step 3 --start 10
+powercurve fan-test pwm3 --step 3 --start 10 --settle 3000
 ```
+
+`--settle` controls how long (in milliseconds) the test waits at each
+duty level before reading RPM, default 2000ms. Increase it for fans
+that take longer to spin up.
 
 The test uses the daemon's override mechanism so other fans keep
 running normally. The override is cleared when the test finishes
@@ -413,6 +424,11 @@ The daemon runs as a systemd service:
 ```
 sudo systemctl enable --now com.vintagetechie.PowerCurve
 ```
+
+## Documentation
+
+`man powercurve` has the full reference covering all commands, config
+options, D-Bus interface, signals, and file locations.
 
 ## Rollback
 
