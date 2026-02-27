@@ -17,6 +17,13 @@ post_upgrade() {
   systemctl try-restart com.vintagetechie.PowerCurve.service
 }
 
+pre_remove() {
+  systemctl stop com.vintagetechie.PowerCurve.service || true
+  systemctl disable com.vintagetechie.PowerCurve.service || true
+}
+
 post_remove() {
   systemctl daemon-reload
+  rm -rf /etc/powercurve
+  rm -rf /var/lib/powercurve
 }
