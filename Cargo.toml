@@ -1,6 +1,6 @@
 [package]
 name = "powercurve"
-version = "0.1.0-beta.5.1"
+version = "0.1.0-beta.5.2"
 authors = ["John Crenshaw"]
 edition = "2021"
 rust-version = "1.93.0"
