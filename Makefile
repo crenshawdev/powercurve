@@ -39,7 +39,7 @@ install: all
 	install -D -m 0755 "target/release/$(BIN)" "$(DESTDIR)$(bindir)/$(BIN)"
 
 uninstall:
-	rm -f "$(DESTDIR)$(bindir)/$(ID)"
+	rm -f "$(DESTDIR)$(bindir)/$(BIN)"
 	rm -f "$(DESTDIR)$(datadir)/dbus-1/interfaces/$(ID).xml"
 	rm -f "$(DESTDIR)$(datadir)/dbus-1/system.d/$(ID).conf"
 	rm -f "$(DESTDIR)$(libdir)/systemd/system/$(ID).service"
