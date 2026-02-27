@@ -1,0 +1,202 @@
+.TH POWERCURVE 1 "February 2026" "powercurve 0.1.0-rc.1" "User Commands"
+.SH NAME
+powercurve \- desktop power management daemon with custom fan curves
+.SH SYNOPSIS
+.B powercurve
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+powercurve is a power management daemon for Linux desktops. It manages power
+profiles (quiet, balanced, performance) and drives fan speeds using configurable
+temperature-to-duty curves read from
+.IR /etc/powercurve/fan.toml .
+.PP
+The daemon runs as a systemd service and exposes a D-Bus interface for profile
+switching and status queries. Fan curves support per-channel temperature
+sources, per-profile overrides, hysteresis, minimum duty floors, stall
+detection, and thermal fallback.
+.SH COMMANDS
+.TP
+.B daemon
+Run the daemon. Registers the D-Bus service and starts the fan control loop.
+Requires root.
+.RS
+.TP
+.BR \-q ", " \-\-quiet
+Suppress log output (set level to off).
+.TP
+.BR \-v ", " \-\-verbose
+Enable debug logging.
+.RE
+.TP
+.B profile \fR[\fIname\fR]
+Query or set the power profile. Without an argument, prints the current
+profile. With an argument (quiet, balanced, performance), switches to that
+profile.
+.TP
+.B status
+Display current daemon state: active profile, CPU/GPU temperatures, per-channel
+fan duties, RPM readings, active curves, and any active overrides or stall
+conditions.
+.TP
+.B fan \fIchannel duty\fR|\fBclear\fR
+Temporarily override a fan channel's duty cycle.
+.I duty
+is a percentage (0-100).
+Use
+.B clear
+to remove the override and return to curve control. Overrides persist until
+cleared or until a profile switch.
+.TP
+.B fan\-test \fIchannel\fR [\fB\-\-step\fR \fIN\fR] [\fB\-\-start\fR \fIN\fR] [\fB\-\-settle\fR \fIMS\fR]
+Find the minimum duty where a fan channel spins. Ramps duty upward from
+.B \-\-start
+(default 5%) in
+.B \-\-step
+(default 5%) increments, waiting
+.B \-\-settle
+(default 2000ms) at each level and reading RPM. Reports the lowest duty with
+non-zero RPM. Requires the daemon to be running.
+.TP
+.B fan\-detect \fR[\fB\-\-generate\fR]
+Detect hwmon devices and print a hardware summary. With
+.BR \-\-generate ,
+outputs a starter fan.toml config instead.
+.TP
+.B config
+Validate
+.I /etc/powercurve/fan.toml
+without starting the daemon. Reports errors and warnings. Does not require root.
+.TP
+.B monitor
+Listen for profile switches, thermal events, and fan stalls on D-Bus and send
+desktop notifications. Also prints events to stdout. Can run as a standalone
+process or as a systemd user service.
+.TP
+.B version
+Print the version and exit.
+.SH CONFIGURATION
+The fan config lives at
+.IR /etc/powercurve/fan.toml .
+Run
+.B powercurve fan\-detect \-\-generate
+to create a starter config for your hardware.
+.PP
+The config has four layers of curve resolution (highest priority first):
+.IP 1. 4
+Per-channel per-profile curves
+.IP 2.
+Per-channel curves
+.IP 3.
+Global profile curves
+.IP 4.
+Shared curve (fallback for all channels)
+.PP
+See the example configs in
+.I /usr/share/doc/powercurve/examples/
+or the project README for full documentation.
+.SS Channel options
+.TP
+.B pwm
+PWM channel name (e.g. pwm1). Must match the sysfs name under the platform
+hwmon.
+.TP
+.B source
+Temperature source: cpu, gpu, or all (max of both).
+.TP
+.B min_duty
+Minimum duty floor as a percentage (0-100). The channel never drops below this
+value, preventing fan stalls on hardware with high spin-up thresholds.
+.TP
+.B stall_detect
+Enable RPM-based stall detection (default: false). When duty > 0 but RPM reads
+0 for consecutive cycles, bumps duty to min_duty or 15%.
+.TP
+.B stall_threshold
+Consecutive zero-RPM reads before triggering stall recovery (default: 3).
+.TP
+.B passthrough
+Skip this channel entirely (default: false). No duty writes, no RPM reads. The
+channel stays under BIOS or firmware control.
+.SS Global options
+.TP
+.B critical_cpu_temp, critical_gpu_temp
+Temperature thresholds (Celsius) where all fans go to maximum duty.
+.TP
+.B hysteresis
+Deadband in Celsius for duty reduction (default: 3.0). Prevents rapid duty
+changes when temperature hovers near a curve point.
+.TP
+.B thermal_fallback
+Auto-downshift profiles when critical temperatures are hit (default: false).
+.TP
+.B thermal_cooldown
+Seconds to wait at stable temps before stepping back up after thermal fallback
+(default: 30).
+.TP
+.B platform
+Hwmon device name to use for PWM outputs. If omitted, auto-detected from
+devices with pwm outputs.
+.SH FILES
+.TP
+.I /etc/powercurve/fan.toml
+Fan configuration file.
+.TP
+.I /var/lib/powercurve/profile
+Persisted power profile state.
+.SH SIGNALS
+.TP
+.B SIGHUP
+Reload the fan config from disk. The daemon validates the new config before
+applying it. On failure, the running config is preserved.
+.TP
+.B SIGTERM
+Clean shutdown. All fans are reset to automatic (BIOS) control.
+.SH D-BUS INTERFACE
+The daemon registers
+.B com.vintagetechie.PowerCurve
+on the system bus at
+.IR /com/vintagetechie/PowerCurve .
+See the introspection XML at
+.IR /usr/share/dbus-1/interfaces/com.vintagetechie.PowerCurve.xml .
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error (connection failure, invalid config, unknown channel, etc.)
+.SH EXAMPLES
+Check current status:
+.PP
+.RS
+.B powercurve status
+.RE
+.PP
+Switch to quiet profile:
+.PP
+.RS
+.B powercurve profile quiet
+.RE
+.PP
+Override a fan for testing:
+.PP
+.RS
+.B powercurve fan pwm3 50
+.RE
+.PP
+Find a fan's minimum spin-up duty:
+.PP
+.RS
+.B powercurve fan-test pwm1
+.RE
+.PP
+Generate a starter config:
+.PP
+.RS
+.B powercurve fan-detect --generate > fan.toml
+.RE
+.SH AUTHOR
+John Crenshaw
+.SH LICENSE
+GPL-3.0-only

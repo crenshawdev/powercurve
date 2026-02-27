@@ -1,0 +1,87 @@
+# Per-profile curves with stall detection and thermal fallback. This is
+# a full-featured config for a system where you want different fan behavior
+# depending on whether you're browsing the web or running a compile.
+
+critical_cpu_temp = 85
+critical_gpu_temp = 80
+hysteresis = 3.0
+
+# Auto-downshift when critical temps are hit. If the CPU hits 85C while
+# on "performance", the daemon drops to "balanced" until temps stabilize
+# for thermal_cooldown seconds.
+thermal_fallback = true
+thermal_cooldown = 30
+
+# Shared curve used as fallback for any channel without its own curve.
+[[curve]]
+temp = 35.0
+duty = 10
+
+[[curve]]
+temp = 50.0
+duty = 30
+
+[[curve]]
+temp = 65.0
+duty = 60
+
+[[curve]]
+temp = 75.0
+duty = 100
+
+# Global profile curves override the shared curve for all channels.
+[profiles.quiet]
+curve = [
+    { temp = 35.0, duty = 5 },
+    { temp = 50.0, duty = 15 },
+    { temp = 65.0, duty = 35 },
+    { temp = 75.0, duty = 60 },
+]
+
+[profiles.performance]
+curve = [
+    { temp = 35.0, duty = 20 },
+    { temp = 50.0, duty = 45 },
+    { temp = 65.0, duty = 75 },
+    { temp = 75.0, duty = 100 },
+]
+
+# CPU fan with stall detection enabled. If the fan stops spinning while
+# duty is above zero, the daemon bumps it to min_duty to restart it.
+[[channels]]
+pwm = "pwm1"
+source = "cpu"
+min_duty = 15.0
+stall_detect = true
+
+# GPU blower needs a higher floor to spin up.
+[[channels]]
+pwm = "pwm3"
+source = "gpu"
+min_duty = 25.0
+stall_detect = true
+
+# Per-channel profile curves for the GPU blower. Quiet mode keeps it
+# gentle, performance mode ramps harder. These override the global
+# profile curve for this channel only.
+[channels.profiles.quiet]
+curve = [
+    { temp = 40.0, duty = 25 },
+    { temp = 55.0, duty = 35 },
+    { temp = 70.0, duty = 50 },
+    { temp = 80.0, duty = 70 },
+]
+
+[channels.profiles.performance]
+curve = [
+    { temp = 40.0, duty = 30 },
+    { temp = 55.0, duty = 55 },
+    { temp = 70.0, duty = 80 },
+    { temp = 80.0, duty = 100 },
+]
+
+# Chipset fan left under firmware control.
+[[channels]]
+pwm = "pwm4"
+source = "all"
+passthrough = true

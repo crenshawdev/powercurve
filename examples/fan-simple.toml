@@ -1,0 +1,26 @@
+# Minimal config: one fan, one curve. Good starting point for single-fan
+# systems like laptops or SFF builds. Run `powercurve fan-detect --generate`
+# to discover your hardware and tweak from there.
+
+critical_cpu_temp = 85
+critical_gpu_temp = 80
+
+[[curve]]
+temp = 35.0
+duty = 15
+
+[[curve]]
+temp = 50.0
+duty = 40
+
+[[curve]]
+temp = 65.0
+duty = 70
+
+[[curve]]
+temp = 80.0
+duty = 100
+
+[[channels]]
+pwm = "pwm1"
+source = "cpu"
