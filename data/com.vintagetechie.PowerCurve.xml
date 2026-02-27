@@ -43,6 +43,10 @@
       <arg name="channel" type="s" direction="in"/>
     </method>
 
+    <method name="GetFanMinDuties">
+      <arg name="min_duties" type="a(si)" direction="out"/>
+    </method>
+
     <signal name="PowerProfileSwitch">
       <arg name="profile" type="s"/>
     </signal>

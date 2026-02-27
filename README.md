@@ -245,6 +245,24 @@ by the configured hysteresis amount (default 3C). Rising temps always
 update immediately. This keeps fans from bouncing between speeds when
 the CPU is hovering around a curve point.
 
+### Minimum duty floor
+
+Some fans stall at low PWM values. If a channel's curve produces a
+duty below the fan's physical minimum, it stops spinning entirely.
+Setting `min_duty` on a channel prevents this:
+
+```toml
+[[channels]]
+pwm = "pwm1"
+source = "cpu"
+min_duty = 15.0  # never drop below 15%
+```
+
+The floor applies even when the curve would otherwise turn the fan
+off. Overrides bypass the floor since they're explicitly set by the
+user. The value is a percentage (0-100), and channels without
+`min_duty` can still stop when cool.
+
 ## Monitoring and status
 
 Check the current state of the daemon:

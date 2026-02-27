@@ -310,6 +310,18 @@ impl PowerService {
         Ok(())
     }
 
+    /// Return each channel's minimum duty floor as (name, duty_byte) pairs.
+    /// Channels without a floor report -1.
+    #[dbus_interface(out_args("min_duties"))]
+    async fn get_fan_min_duties(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.min_duties.iter().map(|(name, floor)| {
+            (name.clone(), floor.map_or(-1, |d| d as i32))
+        }).collect())
+    }
+
     #[dbus_interface(signal)]
     async fn power_profile_switch(
         context: &zbus::SignalContext<'_>,
