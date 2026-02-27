@@ -105,6 +105,8 @@ pub struct FanStatus {
     pub cpu_temp:       Option<u32>,
     pub gpu_temp:       Option<u32>,
     pub channel_duties: Vec<(String, Option<u8>)>,
+    pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
+    pub overrides:      HashMap<String, u8>,
     pub critical:       bool,
     pub config_loaded:  bool,
 }
@@ -317,6 +319,11 @@ impl FanDaemon {
         self.last_duties.fill(0);
         self.last_temps.fill(None);
 
+        // Clear any temporary fan overrides when the profile changes.
+        if let Ok(mut s) = self.status.lock() {
+            s.overrides.clear();
+        }
+
         log::info!("fan curves updated for profile: {}", profile);
     }
 
@@ -466,6 +473,15 @@ impl FanDaemon {
                 }
             } else {
                 for (i, channel) in self.channels.iter().enumerate() {
+                    // Temporary override bypasses curve evaluation entirely.
+                    let override_duty = self.status.lock().ok()
+                        .and_then(|s| s.overrides.get(&channel.pwm).copied());
+                    if let Some(duty) = override_duty {
+                        self.set_channel_duty(&channel.pwm, Some(duty));
+                        duties.push((channel.pwm.clone(), Some(duty)));
+                        continue;
+                    }
+
                     let temp = self.get_temp_for(channel.source);
                     let curve_duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
 
@@ -502,6 +518,9 @@ impl FanDaemon {
                 s.cpu_temp = cpu_temp;
                 s.gpu_temp = gpu_temp;
                 s.channel_duties = duties;
+                s.channel_curves = self.channels.iter()
+                    .map(|ch| (ch.pwm.clone(), ch.curve.to_display_points()))
+                    .collect();
                 s.critical = critical;
             }
 
@@ -641,6 +660,13 @@ impl FanCurve {
             .append(60_00, 70_00)
             .append(65_00, 85_00)
             .append(70_00, 100_00)
+    }
+
+    /// Return curve points as (Celsius, percent) tuples for display.
+    pub fn to_display_points(&self) -> Vec<(f32, f32)> {
+        self.points.iter().map(|p| {
+            (f32::from(p.temp) / 100.0, f32::from(p.duty) / 100.0)
+        }).collect()
     }
 
     pub fn get_duty(&self, temp: i16) -> Option<u16> {

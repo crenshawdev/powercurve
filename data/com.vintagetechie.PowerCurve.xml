@@ -26,6 +26,23 @@
       <arg name="critical" type="b" direction="out"/>
     </method>
 
+    <method name="GetFanCurves">
+      <arg name="curves" type="a(sa(dd))" direction="out"/>
+    </method>
+
+    <method name="GetFanOverrides">
+      <arg name="overrides" type="a(sy)" direction="out"/>
+    </method>
+
+    <method name="SetFanOverride">
+      <arg name="channel" type="s" direction="in"/>
+      <arg name="duty_percent" type="y" direction="in"/>
+    </method>
+
+    <method name="ClearFanOverride">
+      <arg name="channel" type="s" direction="in"/>
+    </method>
+
     <signal name="PowerProfileSwitch">
       <arg name="profile" type="s"/>
     </signal>

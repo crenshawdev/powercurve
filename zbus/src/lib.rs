@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+#![allow(clippy::type_complexity)]
+
 #[zbus::dbus_proxy(
     interface = "com.vintagetechie.PowerCurve",
     default_service = "com.vintagetechie.PowerCurve",
@@ -26,6 +28,18 @@ trait PowerCurve {
 
     /// Get fan config status: (config_loaded, critical).
     fn get_fan_config_status(&self) -> zbus::Result<(bool, bool)>;
+
+    /// Get the active fan curve for each channel as (name, [(temp_c, duty_pct)]) pairs.
+    fn get_fan_curves(&self) -> zbus::Result<Vec<(String, Vec<(f64, f64)>)>>;
+
+    /// Get currently active fan overrides as (channel, duty_percent) pairs.
+    fn get_fan_overrides(&self) -> zbus::Result<Vec<(String, u8)>>;
+
+    /// Temporarily override a fan channel's duty cycle.
+    fn set_fan_override(&self, channel: &str, duty_percent: u8) -> zbus::Result<()>;
+
+    /// Clear a temporary fan override.
+    fn clear_fan_override(&self, channel: &str) -> zbus::Result<()>;
 
     /// PowerProfileSwitch signal
     #[dbus_proxy(signal)]

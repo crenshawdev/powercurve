@@ -42,13 +42,17 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
             _ => profile(&mut client).await.context("failed to get power profile"),
         },
         Args::Status => status(&mut client).await.context("failed to get daemon status"),
-        Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config | Args::Monitor => {
+        Args::Fan { channel, duty } => {
+            fan_override(&mut client, channel, duty).await
+        }
+        Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config
+            | Args::Monitor | Args::Version => {
             unreachable!()
         }
     }
 }
 
-/// Display current daemon state: profile, temps, and fan duties.
+/// Display current daemon state: profile, temps, fan duties, and active curves.
 async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     let profile = client.get_profile().await.ok();
     let profile = profile.as_ref().map_or("?", |s| s.as_str());
@@ -63,13 +67,31 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
         }
     }
 
+    let overrides: Vec<(String, u8)> = client.get_fan_overrides().await.unwrap_or_default();
+
     if let Ok(duties) = client.get_fan_duties().await {
         for (name, duty) in &duties {
+            let override_tag = overrides.iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, pct)| format!(" [override {}%]", pct))
+                .unwrap_or_default();
             if *duty >= 0 {
                 let pct = (*duty as f64 / 255.0) * 100.0;
-                println!("{}: {}/255 ({:.0}%)", name, duty, pct);
+                println!("{}: {}/255 ({:.0}%){}", name, duty, pct, override_tag);
             } else {
-                println!("{}: --", name);
+                println!("{}: --{}", name, override_tag);
+            }
+        }
+    }
+
+    if let Ok(curves) = client.get_fan_curves().await {
+        if !curves.is_empty() {
+            println!("\nCurves:");
+            for (name, points) in &curves {
+                let pts: Vec<String> = points.iter()
+                    .map(|(t, d)| format!("{:.0}C/{:.0}%", t, d))
+                    .collect();
+                println!("  {}: {}", name, pts.join(" "));
             }
         }
     }
@@ -83,6 +105,27 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Set or clear a temporary fan duty override.
+async fn fan_override(
+    client: &mut PowerCurveProxy<'_>,
+    channel: &str,
+    duty: &str,
+) -> anyhow::Result<()> {
+    if duty == "clear" {
+        client.clear_fan_override(channel).await.map_err(zbus_error)?;
+        println!("{}: override cleared", channel);
+    } else {
+        let pct: u8 = duty.parse()
+            .context("duty must be 0-100 or 'clear'")?;
+        if pct > 100 {
+            anyhow::bail!("duty must be 0-100");
+        }
+        client.set_fan_override(channel, pct).await.map_err(zbus_error)?;
+        println!("{}: override set to {}%", channel, pct);
+    }
     Ok(())
 }
 

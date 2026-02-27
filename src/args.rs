@@ -80,6 +80,21 @@ pub enum Args {
                       signals from the daemon and sends desktop notifications. Does not require root"
     )]
     Monitor,
+    #[clap(about = "Print the version and exit")]
+    Version,
+    #[clap(
+        about = "Temporarily override a fan channel's duty cycle",
+        long_about = "Sets a temporary duty override on a PWM channel for testing.\n\n\
+                      powercurve fan pwm3 50    - set pwm3 to 50%\n\
+                      powercurve fan pwm3 clear - remove override, return to curve control\n\n\
+                      Overrides last until the next profile change or until cleared"
+    )]
+    Fan {
+        #[clap(help = "PWM channel name (e.g. pwm3)")]
+        channel: String,
+        #[clap(help = "Duty cycle percentage (0-100) or 'clear' to remove override")]
+        duty: String,
+    },
 }
 
 #[cfg(test)]
@@ -144,6 +159,36 @@ mod tests {
     fn parse_fan_detect_generate() {
         let args = Args::parse_from(["powercurve", "fan-detect", "--generate"]);
         assert!(matches!(args, Args::FanDetect { generate: true }));
+    }
+
+    #[test]
+    fn parse_version() {
+        let args = Args::parse_from(["powercurve", "version"]);
+        assert!(matches!(args, Args::Version));
+    }
+
+    #[test]
+    fn parse_fan_override() {
+        let args = Args::parse_from(["powercurve", "fan", "pwm3", "50"]);
+        match args {
+            Args::Fan { channel, duty } => {
+                assert_eq!(channel, "pwm3");
+                assert_eq!(duty, "50");
+            }
+            _ => panic!("expected Fan variant"),
+        }
+    }
+
+    #[test]
+    fn parse_fan_clear() {
+        let args = Args::parse_from(["powercurve", "fan", "pwm3", "clear"]);
+        match args {
+            Args::Fan { channel, duty } => {
+                assert_eq!(channel, "pwm3");
+                assert_eq!(duty, "clear");
+            }
+            _ => panic!("expected Fan variant"),
+        }
     }
 
     #[test]
