@@ -11,6 +11,7 @@ pub mod daemon;
 pub mod errors;
 pub mod fan;
 pub mod fan_detect;
+pub mod fan_test;
 pub mod graphics;
 pub mod kernel_parameters;
 pub mod logging;

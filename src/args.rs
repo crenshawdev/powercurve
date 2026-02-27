@@ -95,6 +95,25 @@ pub enum Args {
         #[clap(help = "Duty cycle percentage (0-100) or 'clear' to remove override")]
         duty: String,
     },
+    #[clap(
+        name = "fan-test",
+        about = "Find the minimum duty where a fan spins",
+        long_about = "Ramps duty from a starting percentage upward in fixed increments, reading\n\
+                      RPM at each step, until the fan starts spinning. Reports the minimum duty\n\
+                      as a suggested min_duty value for fan.toml.\n\n\
+                      Requires the daemon to be running. Other fans keep normal curve control\n\
+                      during the test. The override is cleared when the test finishes or on Ctrl-C"
+    )]
+    FanTest {
+        #[clap(help = "PWM channel name (e.g. pwm1)")]
+        channel: String,
+        #[clap(long, default_value = "5", help = "Duty step increment (percent)")]
+        step: u8,
+        #[clap(long, default_value = "5", help = "Starting duty (percent)")]
+        start: u8,
+        #[clap(long, default_value = "2000", help = "Settle time per step (ms)")]
+        settle: u64,
+    },
 }
 
 #[cfg(test)]
@@ -188,6 +207,36 @@ mod tests {
                 assert_eq!(duty, "clear");
             }
             _ => panic!("expected Fan variant"),
+        }
+    }
+
+    #[test]
+    fn parse_fan_test() {
+        let args = Args::parse_from(["powercurve", "fan-test", "pwm1"]);
+        match args {
+            Args::FanTest { channel, step, start, settle } => {
+                assert_eq!(channel, "pwm1");
+                assert_eq!(step, 5);
+                assert_eq!(start, 5);
+                assert_eq!(settle, 2000);
+            }
+            _ => panic!("expected FanTest variant"),
+        }
+    }
+
+    #[test]
+    fn parse_fan_test_options() {
+        let args = Args::parse_from([
+            "powercurve", "fan-test", "pwm3", "--step", "3", "--start", "10", "--settle", "3000",
+        ]);
+        match args {
+            Args::FanTest { channel, step, start, settle } => {
+                assert_eq!(channel, "pwm3");
+                assert_eq!(step, 3);
+                assert_eq!(start, 10);
+                assert_eq!(settle, 3000);
+            }
+            _ => panic!("expected FanTest variant"),
         }
     }
 

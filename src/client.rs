@@ -45,6 +45,9 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
         Args::Fan { channel, duty } => {
             fan_override(&mut client, channel, duty).await
         }
+        Args::FanTest { ref channel, step, start, settle } => {
+            crate::fan_test::run(&mut client, channel, *start, *step, *settle).await
+        }
         Args::Daemon { .. } | Args::FanDetect { .. } | Args::Config
             | Args::Monitor | Args::Version => {
             unreachable!()
