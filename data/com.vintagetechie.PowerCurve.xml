@@ -64,6 +64,11 @@
       <arg name="temp_millideg" type="x"/>
       <arg name="profile" type="s"/>
     </signal>
+
+    <signal name="StallEvent">
+      <arg name="channel" type="s"/>
+      <arg name="duty" type="y"/>
+    </signal>
   </interface>
 
   <interface name="org.freedesktop.DBus.Introspectable">
