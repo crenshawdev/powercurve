@@ -322,6 +322,27 @@ impl PowerService {
         }).collect())
     }
 
+    /// Return each channel's current RPM reading as (name, rpm) pairs.
+    /// Channels without a tachometer report -1.
+    #[dbus_interface(out_args("rpms"))]
+    async fn get_fan_rpms(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.rpms.iter().map(|(name, rpm)| {
+            (name.clone(), rpm.map_or(-1, |r| r as i32))
+        }).collect())
+    }
+
+    /// Return the names of any channels currently detected as stalled.
+    #[dbus_interface(out_args("stalled"))]
+    async fn get_stalled_fans(&self) -> zbus::fdo::Result<Vec<String>> {
+        let status = self.1.lock().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("status lock: {}", e))
+        })?;
+        Ok(status.stalled.clone())
+    }
+
     #[dbus_interface(signal)]
     async fn power_profile_switch(
         context: &zbus::SignalContext<'_>,

@@ -47,6 +47,14 @@
       <arg name="min_duties" type="a(si)" direction="out"/>
     </method>
 
+    <method name="GetFanRpms">
+      <arg name="rpms" type="a(si)" direction="out"/>
+    </method>
+
+    <method name="GetStalledFans">
+      <arg name="stalled" type="as" direction="out"/>
+    </method>
+
     <signal name="PowerProfileSwitch">
       <arg name="profile" type="s"/>
     </signal>

@@ -56,9 +56,11 @@ pub(crate) struct ChannelProfileConfig {
 pub(crate) struct ChannelConfig {
     pub pwm:      String,
     pub source:   String,
-    pub min_duty: Option<f32>,
-    pub curve:    Option<Vec<CurvePoint>>,
-    pub profiles: Option<HashMap<String, ChannelProfileConfig>>,
+    pub min_duty:        Option<f32>,
+    pub stall_detect:    Option<bool>,
+    pub stall_threshold: Option<u32>,
+    pub curve:           Option<Vec<CurvePoint>>,
+    pub profiles:        Option<HashMap<String, ChannelProfileConfig>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -85,21 +87,25 @@ pub enum TempSource {
 /// Maps a single PWM output to a temperature source and fan curve.
 #[derive(Clone, Debug)]
 pub struct FanChannel {
-    pub pwm:      String,
-    pub source:   TempSource,
-    pub curve:    FanCurve,
-    pub min_duty: Option<u8>,
+    pub pwm:             String,
+    pub source:          TempSource,
+    pub curve:           FanCurve,
+    pub min_duty:        Option<u8>,
+    pub stall_detect:    bool,
+    pub stall_threshold: u32,
 }
 
 /// Stored per-channel definition from config, used to rebuild curves
 /// when the active profile changes.
 #[derive(Clone)]
 struct ChannelDef {
-    pwm:            String,
-    source:         TempSource,
-    override_curve: Option<FanCurve>,
-    profile_curves: HashMap<String, FanCurve>,
-    min_duty_byte:  Option<u8>,
+    pwm:             String,
+    source:          TempSource,
+    override_curve:  Option<FanCurve>,
+    profile_curves:  HashMap<String, FanCurve>,
+    min_duty_byte:   Option<u8>,
+    stall_detect:    bool,
+    stall_threshold: u32,
 }
 
 /// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
@@ -111,6 +117,8 @@ pub struct FanStatus {
     pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
     pub overrides:      HashMap<String, u8>,
     pub min_duties:     Vec<(String, Option<u8>)>,
+    pub rpms:           Vec<(String, Option<u32>)>,
+    pub stalled:        Vec<String>,
     pub critical:       bool,
     pub config_loaded:  bool,
 }
@@ -125,6 +133,7 @@ pub struct FanDaemon {
     hysteresis:        u32,
     last_duties:       Vec<u8>,
     last_temps:        Vec<Option<u32>>,
+    stall_counts:      Vec<u32>,
     platform_names:    Vec<String>,
     amdgpus:           Vec<HwMon>,
     platforms:         Vec<HwMon>,
@@ -156,6 +165,7 @@ impl FanDaemon {
             hysteresis: (DEFAULT_HYSTERESIS_C * 1000.0) as u32,
             last_duties: Vec::new(),
             last_temps: Vec::new(),
+            stall_counts: Vec::new(),
             platform_names: Vec::new(),
             amdgpus: Vec::new(),
             platforms: Vec::new(),
@@ -197,21 +207,25 @@ impl FanDaemon {
                         ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8
                     });
                     ChannelDef {
-                        pwm:            ch.pwm.clone(),
-                        source:         parse_temp_source(&ch.source),
-                        override_curve: ch.curve.as_deref().map(build_curve),
+                        pwm:             ch.pwm.clone(),
+                        source:          parse_temp_source(&ch.source),
+                        override_curve:  ch.curve.as_deref().map(build_curve),
                         profile_curves,
                         min_duty_byte,
+                        stall_detect:    ch.stall_detect.unwrap_or(false),
+                        stall_threshold: ch.stall_threshold.unwrap_or(3),
                     }
                 })
                 .collect();
 
             self.channels = self.channel_defs.iter().map(|def| {
                 FanChannel {
-                    pwm:      def.pwm.clone(),
-                    source:   def.source,
-                    curve:    def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
-                    min_duty: def.min_duty_byte,
+                    pwm:             def.pwm.clone(),
+                    source:          def.source,
+                    curve:           def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
+                    min_duty:        def.min_duty_byte,
+                    stall_detect:    def.stall_detect,
+                    stall_threshold: def.stall_threshold,
                 }
             }).collect();
 
@@ -252,6 +266,7 @@ impl FanDaemon {
         let count = self.channels.len();
         self.last_duties = vec![0; count];
         self.last_temps = vec![None; count];
+        self.stall_counts = vec![0; count];
 
         if !self.platform_names.is_empty() {
             if let Err(err) = self.discover() {
@@ -322,12 +337,15 @@ impl FanDaemon {
                     .unwrap_or(global_curve)
                     .clone();
                 ch.min_duty = def.min_duty_byte;
+                ch.stall_detect = def.stall_detect;
+                ch.stall_threshold = def.stall_threshold;
             }
         }
 
-        // Reset hysteresis tracking so the new curves take effect immediately
+        // Reset hysteresis and stall tracking so the new curves take effect immediately
         self.last_duties.fill(0);
         self.last_temps.fill(None);
+        self.stall_counts.fill(0);
 
         // Clear any temporary fan overrides when the profile changes.
         if let Ok(mut s) = self.status.lock() {
@@ -456,6 +474,20 @@ impl FanDaemon {
         }
     }
 
+    /// Read RPM from the fan tachometer that corresponds to a PWM channel.
+    ///
+    /// Extracts the numeric index from the channel name (e.g. "pwm2" -> 2)
+    /// and reads fanN_input from the platform hwmon. Returns None if the
+    /// sensor doesn't exist or can't be read.
+    fn read_fan_rpm(&self, pwm: &str) -> Option<u32> {
+        let idx: u64 = pwm.strip_prefix("pwm")?.parse().ok()?;
+        self.platforms.iter()
+            .find_map(|p| p.fan(idx).ok().and_then(|f| f.input().ok()))
+    }
+
+    /// Fallback duty for stall recovery when no min_duty is configured.
+    const STALL_FALLBACK_DUTY: u8 = 38; // ~15%
+
     /// Evaluate each fan channel against its temperature source and apply the result.
     ///
     /// If any component crosses the critical threshold, all fans go to max
@@ -474,13 +506,17 @@ impl FanDaemon {
                 || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
 
             let mut duties = Vec::new();
+            let mut rpms = Vec::new();
+            let mut stalled = Vec::new();
 
             if critical {
                 log::warn!("critical temp reached, all fans to max");
                 for channel in &self.channels {
                     self.set_channel_duty(&channel.pwm, Some(255));
                     duties.push((channel.pwm.clone(), Some(255)));
+                    rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
                 }
+                self.stall_counts.fill(0);
             } else {
                 for (i, channel) in self.channels.iter().enumerate() {
                     // Temporary override bypasses curve evaluation entirely.
@@ -489,6 +525,8 @@ impl FanDaemon {
                     if let Some(duty) = override_duty {
                         self.set_channel_duty(&channel.pwm, Some(duty));
                         duties.push((channel.pwm.clone(), Some(duty)));
+                        rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
+                        self.stall_counts[i] = 0;
                         continue;
                     }
 
@@ -525,8 +563,45 @@ impl FanDaemon {
                         (None, Some(floor))    => Some(floor),
                         (duty, None)           => duty,
                     };
-                    self.set_channel_duty(&channel.pwm, floored_duty);
-                    duties.push((channel.pwm.clone(), floored_duty));
+
+                    // Stall detection: if duty > 0 but RPM reads 0, the fan
+                    // may have stalled. Bump to floor or fallback after
+                    // consecutive zero-RPM reads exceed the threshold.
+                    let rpm = if channel.stall_detect {
+                        self.read_fan_rpm(&channel.pwm)
+                    } else {
+                        None
+                    };
+
+                    let final_duty = if channel.stall_detect {
+                        let is_spinning = floored_duty.is_some_and(|d| d > 0);
+                        let rpm_zero = rpm.is_some_and(|r| r == 0);
+
+                        if is_spinning && rpm_zero {
+                            self.stall_counts[i] += 1;
+                            if self.stall_counts[i] >= channel.stall_threshold {
+                                let bump = channel.min_duty
+                                    .unwrap_or(Self::STALL_FALLBACK_DUTY);
+                                log::warn!(
+                                    "{}: fan stalled (0 RPM with duty > 0), bumping to {}",
+                                    channel.pwm, bump
+                                );
+                                stalled.push(channel.pwm.clone());
+                                Some(floored_duty.map_or(bump, |d| d.max(bump)))
+                            } else {
+                                floored_duty
+                            }
+                        } else {
+                            self.stall_counts[i] = 0;
+                            floored_duty
+                        }
+                    } else {
+                        floored_duty
+                    };
+
+                    self.set_channel_duty(&channel.pwm, final_duty);
+                    duties.push((channel.pwm.clone(), final_duty));
+                    rpms.push((channel.pwm.clone(), rpm));
                 }
             }
 
@@ -540,6 +615,8 @@ impl FanDaemon {
                 s.min_duties = self.channels.iter()
                     .map(|ch| (ch.pwm.clone(), ch.min_duty))
                     .collect();
+                s.rpms = rpms;
+                s.stalled = stalled;
                 s.critical = critical;
             }
 
@@ -1142,5 +1219,54 @@ mod tests {
         assert!(quiet_curve.get_duty(50_00).unwrap() < shared_curve.get_duty(50_00).unwrap());
         // Performance curve is more aggressive
         assert!(perf_curve.get_duty(50_00).unwrap() > shared_curve.get_duty(50_00).unwrap());
+    }
+
+    #[test]
+    fn config_stall_detect() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 40.0
+            duty = 15
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+            stall_detect = true
+            stall_threshold = 5
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.channels[0].stall_detect, Some(true));
+        assert_eq!(config.channels[0].stall_threshold, Some(5));
+    }
+
+    #[test]
+    fn config_stall_detect_defaults() {
+        let toml_str = r#"
+            critical_cpu_temp = 85
+            critical_gpu_temp = 80
+
+            [[curve]]
+            temp = 40.0
+            duty = 15
+
+            [[channels]]
+            pwm = "pwm1"
+            source = "cpu"
+        "#;
+
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.channels[0].stall_detect.is_none());
+        assert!(config.channels[0].stall_threshold.is_none());
+    }
+
+    #[test]
+    fn stall_fallback_duty() {
+        // Verify the fallback constant is ~15%
+        let pct = (FanDaemon::STALL_FALLBACK_DUTY as f32 / 255.0) * 100.0;
+        assert!(pct > 14.0 && pct < 16.0);
     }
 }

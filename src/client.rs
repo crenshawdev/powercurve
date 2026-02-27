@@ -69,6 +69,8 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
 
     let overrides: Vec<(String, u8)> = client.get_fan_overrides().await.unwrap_or_default();
     let floors: Vec<(String, i32)> = client.get_fan_min_duties().await.unwrap_or_default();
+    let rpms: Vec<(String, i32)> = client.get_fan_rpms().await.unwrap_or_default();
+    let stalled: Vec<String> = client.get_stalled_fans().await.unwrap_or_default();
 
     if let Ok(duties) = client.get_fan_duties().await {
         for (name, duty) in &duties {
@@ -84,11 +86,26 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
                     None
                 })
                 .unwrap_or_default();
+            let rpm_tag = rpms.iter()
+                .find(|(k, _)| k == name)
+                .and_then(|(_, r)| if *r >= 0 {
+                    Some(format!(" [{} RPM]", r))
+                } else {
+                    None
+                })
+                .unwrap_or_default();
+            let stall_tag = if stalled.iter().any(|s| s == name) {
+                " [STALLED]"
+            } else {
+                ""
+            };
             if *duty >= 0 {
                 let pct = (*duty as f64 / 255.0) * 100.0;
-                println!("{}: {}/255 ({:.0}%){}{}", name, duty, pct, override_tag, floor_tag);
+                println!("{}: {}/255 ({:.0}%){}{}{}{}",
+                    name, duty, pct, override_tag, floor_tag, rpm_tag, stall_tag);
             } else {
-                println!("{}: --{}{}", name, override_tag, floor_tag);
+                println!("{}: --{}{}{}{}",
+                    name, override_tag, floor_tag, rpm_tag, stall_tag);
             }
         }
     }
