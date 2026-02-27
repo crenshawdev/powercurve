@@ -321,6 +321,28 @@ Overrides show up in `powercurve status` with an `[override]` tag
 next to the affected channel. Switching profiles clears all overrides
 automatically.
 
+### Finding the spin-up floor
+
+If you're not sure what `min_duty` to set for a channel, `fan-test`
+finds it for you. It ramps duty upward from 5% in 5% increments,
+reading RPM at each step, and reports the lowest duty where the fan
+actually spins:
+
+```
+powercurve fan-test pwm1
+```
+
+For finer resolution or a different starting point:
+
+```
+powercurve fan-test pwm3 --step 3 --start 10
+```
+
+The test uses the daemon's override mechanism so other fans keep
+running normally. The override is cleared when the test finishes
+or if you hit Ctrl-C. Use the reported value as your `min_duty`
+in fan.toml.
+
 For desktop notifications on profile switches and thermal events, run
 the monitor as a user service:
 
