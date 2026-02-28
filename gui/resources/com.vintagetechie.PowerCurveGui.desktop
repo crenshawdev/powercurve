@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=PowerCurve
+Comment=Power profile and fan management for the COSMIC desktop
+Type=Application
+Icon=com.vintagetechie.PowerCurveGui
+Exec=powercurve-gui %F
+Terminal=false
+StartupNotify=true
+Categories=System;Settings;HardwareSettings;
+Keywords=power;fan;temperature;thermal;

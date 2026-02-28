@@ -1,19 +1,66 @@
 [package]
+edition = "2021"
+rust-version = "1.93.0"
 name = "powercurve"
 version = "0.1.0-rc.1"
 authors = ["John Crenshaw"]
-edition = "2021"
-rust-version = "1.93.0"
 
-[workspace]
-members = [ "zbus" ]
-
-[workspace.dependencies]
-serde = { version = "1.0", features = ["derive"] }
+[package.metadata.deb]
+license-file = "LICENSE"
+depends = "dbus"
+provides = "power-profiles-daemon"
+conflicts = "power-profiles-daemon"
+maintainer-scripts = "debian/"
+assets = [
+    [
+    "target/release/powercurve",
+    "usr/bin/",
+    "755",
+],
+    [
+    "data/com.vintagetechie.PowerCurve.conf",
+    "usr/share/dbus-1/system.d/",
+    "644",
+],
+    [
+    "data/com.vintagetechie.PowerCurve.xml",
+    "usr/share/dbus-1/interfaces/",
+    "644",
+],
+    [
+    "data/com.vintagetechie.PowerCurve.service",
+    "usr/lib/systemd/system/",
+    "644",
+],
+    [
+    "data/powercurve-monitor.service",
+    "usr/lib/systemd/user/",
+    "644",
+],
+    [
+    "man/powercurve.1",
+    "usr/share/man/man1/",
+    "644",
+],
+    [
+    "examples/fan-simple.toml",
+    "usr/share/doc/powercurve/examples/",
+    "644",
+],
+    [
+    "examples/fan-desktop.toml",
+    "usr/share/doc/powercurve/examples/",
+    "644",
+],
+    [
+    "examples/fan-profiles.toml",
+    "usr/share/doc/powercurve/examples/",
+    "644",
+],
+]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
 concat-in-place = "1"
 fern = "0.6"
 futures-lite = "2"
@@ -21,14 +68,36 @@ intel-pstate = "1"
 libc = "0.2"
 log = "0.4"
 once_cell = "1"
-serde.workspace = true
-sysfs-class = { git = "https://github.com/pop-os/sysfs-class" }
-powercurve-zbus = { path = "zbus" }
 thiserror = "1"
 toml = "0.8"
-tokio = { version = "1", features = ["macros", "rt", "time", "signal"] }
-zbus = { version = "3", default-features = false, features = [ "tokio"] }
 zvariant = "3"
+
+[dependencies.clap]
+version = "4"
+features = ["derive"]
+
+[dependencies.powercurve-zbus]
+path = "zbus"
+
+[dependencies.serde]
+workspace = true
+
+[dependencies.sysfs-class]
+git = "https://github.com/pop-os/sysfs-class"
+
+[dependencies.tokio]
+version = "1"
+features = [
+    "macros",
+    "rt",
+    "time",
+    "signal",
+]
+
+[dependencies.zbus]
+version = "3"
+features = ["tokio"]
+default-features = false
 
 [dev-dependencies]
 env_logger = "0.11"
@@ -38,20 +107,12 @@ match_like_matches_macro = "allow"
 missing_safety_doc = "allow"
 single_match = "allow"
 
-[package.metadata.deb]
-license-file = "LICENSE"
-depends = "dbus"
-provides = "power-profiles-daemon"
-conflicts = "power-profiles-daemon"
-maintainer-scripts = "debian/"
-assets = [
-    ["target/release/powercurve", "usr/bin/", "755"],
-    ["data/com.vintagetechie.PowerCurve.conf", "usr/share/dbus-1/system.d/", "644"],
-    ["data/com.vintagetechie.PowerCurve.xml", "usr/share/dbus-1/interfaces/", "644"],
-    ["data/com.vintagetechie.PowerCurve.service", "usr/lib/systemd/system/", "644"],
-    ["data/powercurve-monitor.service", "usr/lib/systemd/user/", "644"],
-    ["man/powercurve.1", "usr/share/man/man1/", "644"],
-    ["examples/fan-simple.toml", "usr/share/doc/powercurve/examples/", "644"],
-    ["examples/fan-desktop.toml", "usr/share/doc/powercurve/examples/", "644"],
-    ["examples/fan-profiles.toml", "usr/share/doc/powercurve/examples/", "644"],
+[workspace]
+members = [
+    "gui",
+    "zbus",
 ]
+
+[workspace.dependencies.serde]
+version = "1.0"
+features = ["derive"]
