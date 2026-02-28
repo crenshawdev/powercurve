@@ -91,7 +91,7 @@ then suggests a config with auto-detected critical temperatures.
 To generate a config (or regenerate after hardware changes):
 
 ```
-sudo powercurve fan-detect --generate > /etc/powercurve/fan.toml
+powercurve fan-detect --generate | sudo tee /etc/powercurve/fan.toml > /dev/null
 ```
 
 The `--generate` flag outputs only the TOML config with no device
