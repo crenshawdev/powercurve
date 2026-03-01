@@ -430,6 +430,8 @@ sudo systemctl enable --now com.vintagetechie.PowerCurve
 `man powercurve` has the full reference covering all commands, config
 options, D-Bus interface, signals, and file locations.
 
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+
 ## Rollback
 
 See [ROLLBACK.md](ROLLBACK.md) for instructions on switching back to
