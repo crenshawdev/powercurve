@@ -112,16 +112,19 @@ release:
     - job: package-deb
       artifacts: true
   script:
-    - echo "Creating release for ${CI_COMMIT_TAG}"
-  release:
-    tag_name: $CI_COMMIT_TAG
-    description: "Release ${CI_COMMIT_TAG}"
-    assets:
-      links:
-        - name: "Arch package"
-          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/download"
-        - name: "Debian package"
-          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/download"
+    - apk add --no-cache curl
+    - PKG_ARCH="$(ls powercurve-git-*.pkg.tar.zst | head -1)"
+    - PKG_DEB="$(basename $(ls release/*.deb | head -1))"
+    - >
+      curl --header "PRIVATE-TOKEN: ${DEPLOY_TOKEN}" --upload-file "${PKG_ARCH}"
+      "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/powercurve/${CI_COMMIT_TAG}/${PKG_ARCH}"
+    - >
+      curl --header "PRIVATE-TOKEN: ${DEPLOY_TOKEN}" --upload-file "release/${PKG_DEB}"
+      "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/powercurve/${CI_COMMIT_TAG}/${PKG_DEB}"
+    - >
+      release-cli create --name "Release ${CI_COMMIT_TAG}" --tag-name "${CI_COMMIT_TAG}"
+      --assets-link "{\"name\":\"Arch package\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/powercurve/${CI_COMMIT_TAG}/${PKG_ARCH}\"}"
+      --assets-link "{\"name\":\"Debian package\",\"url\":\"${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/powercurve/${CI_COMMIT_TAG}/${PKG_DEB}\"}"
   rules:
     - if: $CI_COMMIT_TAG =~ /^v/
 
