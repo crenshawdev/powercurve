@@ -3,7 +3,7 @@ pkgver=1.2.9.r469.865486c
 pkgrel=1
 pkgdesc="Lightweight desktop power management daemon with configurable fan curves"
 arch=('x86_64' 'aarch64')
-url="https://codeberg.org/VintageTechie/powercurve"
+url="https://gitlab.com/vintagetechie/powercurve"
 license=('GPL-3.0-or-later')
 depends=(
   'dbus'
@@ -13,7 +13,7 @@ provides=('system76-power' 'power-profiles-daemon')
 conflicts=('system76-power' 'power-profiles-daemon')
 backup=('etc/powercurve/fan.toml')
 install="powercurve.install"
-source=("git+https://codeberg.org/VintageTechie/powercurve.git")
+source=("git+https://gitlab.com/vintagetechie/powercurve.git")
 sha256sums=('SKIP')
 
 pkgver() {
