@@ -54,7 +54,6 @@ pub fn balanced(errors: &mut Vec<ProfileError>) {
                 .no_turbo(false)
         )
     );
-
 }
 
 /// Sets parameters for the performance profile.
@@ -81,7 +80,6 @@ pub fn performance(errors: &mut Vec<ProfileError>) {
     if pci_runtime_pm_support() {
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::Off));
     }
-
 }
 
 /// Sets parameters for the quiet profile. Reduces CPU clocks and enables
@@ -104,7 +102,6 @@ pub fn quiet(errors: &mut Vec<ProfileError>) {
     if pci_runtime_pm_support() {
         catch!(errors, pci_device_runtime_pm(RuntimePowerManagement::On));
     }
-
 }
 
 /// Controls the Intel [`PState`] values.

@@ -11,24 +11,24 @@ const GPU_DRIVERS: &[&str] = &["amdgpu"];
 /// A discovered hwmon device with its temperature and PWM capabilities.
 struct HwmonDevice {
     index: String,
-    name:  String,
+    name: String,
     temps: Vec<TempInput>,
-    pwms:  Vec<PwmOutput>,
+    pwms: Vec<PwmOutput>,
 }
 
 struct TempInput {
-    file:  String,
+    file: String,
     label: String,
     value: String,
-    crit:  Option<u32>,
+    crit: Option<u32>,
 }
 
 struct PwmOutput {
-    file:   String,
-    value:  String,
-    max:    String,
-    rpm:    Option<String>,
-    label:  String,
+    file: String,
+    value: String,
+    max: String,
+    rpm: Option<String>,
+    label: String,
 }
 
 /// Enumerate hwmon devices and print a summary plus a starter fan.toml.
@@ -88,9 +88,7 @@ fn discover_hwmon() -> anyhow::Result<Vec<HwmonDevice>> {
     }
 
     let mut devices = Vec::new();
-    let mut entries: Vec<_> = fs::read_dir(hwmon_dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut entries: Vec<_> = fs::read_dir(hwmon_dir)?.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -122,9 +120,8 @@ fn discover_temps(hwmon_path: &Path) -> Vec<TempInput> {
             continue;
         }
 
-        let value = fs::read_to_string(&input_path)
-            .map(|v| v.trim().to_owned())
-            .unwrap_or_default();
+        let value =
+            fs::read_to_string(&input_path).map(|v| v.trim().to_owned()).unwrap_or_default();
 
         let label_file = format!("temp{}_label", i);
         let label = fs::read_to_string(hwmon_path.join(label_file))
@@ -183,9 +180,8 @@ fn print_device(dev: &HwmonDevice) {
     for temp in &dev.temps {
         let millideg: f64 = temp.value.parse().unwrap_or(0.0);
         let celsius = millideg / 1000.0;
-        let crit_str = temp.crit
-            .map(|c| format!(", crit {:.1}C", c as f64 / 1000.0))
-            .unwrap_or_default();
+        let crit_str =
+            temp.crit.map(|c| format!(", crit {:.1}C", c as f64 / 1000.0)).unwrap_or_default();
         if temp.label.is_empty() {
             println!("    {}: {:.1}C{}", temp.file, celsius, crit_str);
         } else {
@@ -241,9 +237,9 @@ fn detect_cpu_critical(devices: &[HwmonDevice]) -> u32 {
 
         // No temp_crit, fall back by driver name
         return match dev.name.as_str() {
-            "coretemp"             => 85,
+            "coretemp" => 85,
             "k10temp" | "zenpower" => 80,
-            _                      => 80,
+            _ => 80,
         };
     }
 
@@ -280,7 +276,8 @@ fn generate_config(platform: &HwmonDevice, cpu_crit: u32, gpu_crit: u32) -> Stri
     writeln!(out, "critical_gpu_temp = {}", gpu_crit).ok();
     writeln!(out).ok();
     writeln!(out, "# Smooth fan curve with tight steps through the idle range and a").ok();
-    writeln!(out, "# gentle ramp into load. Always-on floor at 10% avoids start/stop cycling.").ok();
+    writeln!(out, "# gentle ramp into load. Always-on floor at 10% avoids start/stop cycling.")
+        .ok();
     writeln!(out, "[[curve]]").ok();
     writeln!(out, "temp = 30.0").ok();
     writeln!(out, "duty = 10").ok();
@@ -336,11 +333,7 @@ fn generate_config(platform: &HwmonDevice, cpu_crit: u32, gpu_crit: u32) -> Stri
         }
         writeln!(out, "[[channels]]").ok();
         writeln!(out, "pwm = \"{}\"", pwm.file).ok();
-        let source = if has_labels {
-            source_from_label(&pwm.label)
-        } else {
-            "all"
-        };
+        let source = if has_labels { source_from_label(&pwm.label) } else { "all" };
         writeln!(out, "source = \"{}\"", source).ok();
     }
 

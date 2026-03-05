@@ -8,11 +8,11 @@ use crate::kernel_parameters::{
 };
 
 pub struct RadeonDevice {
-    card:                      u8,
-    pub dpm_state:             RadeonDpmState,
+    card: u8,
+    pub dpm_state: RadeonDpmState,
     pub dpm_force_performance: RadeonDpmForcePerformance,
-    pub power_method:          RadeonPowerMethod,
-    pub power_profile:         RadeonPowerProfile,
+    pub power_method: RadeonPowerMethod,
+    pub power_profile: RadeonPowerProfile,
 }
 
 impl RadeonDevice {
@@ -59,5 +59,7 @@ impl RadeonDevice {
 impl DeviceList<Self> for RadeonDevice {
     const SUPPORTED: &'static [&'static str] = &[""];
 
-    fn get_devices() -> Box<dyn Iterator<Item = Self>> { Box::new((0u8..10).filter_map(Self::new)) }
+    fn get_devices() -> Box<dyn Iterator<Item = Self>> {
+        Box::new((0u8..10).filter_map(Self::new))
+    }
 }

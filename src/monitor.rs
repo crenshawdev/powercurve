@@ -11,18 +11,15 @@ use zbus::Connection;
 pub async fn run() -> anyhow::Result<()> {
     // Ignore SIGHUP so `kill -HUP $(pidof powercurve)` only reloads
     // the daemon without killing the monitor.
-    unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN); }
-    let system = Connection::system()
-        .await
-        .context("failed to connect to system bus")?;
+    unsafe {
+        libc::signal(libc::SIGHUP, libc::SIG_IGN);
+    }
+    let system = Connection::system().await.context("failed to connect to system bus")?;
 
-    let session = Connection::session()
-        .await
-        .context("failed to connect to session bus")?;
+    let session = Connection::session().await.context("failed to connect to session bus")?;
 
-    let proxy = PowerCurveProxy::new(&system)
-        .await
-        .context("failed to connect to powercurve daemon")?;
+    let proxy =
+        PowerCurveProxy::new(&system).await.context("failed to connect to powercurve daemon")?;
 
     let mut profile_stream = proxy.receive_power_profile_switch().await?;
     let mut thermal_stream = proxy.receive_thermal_event().await?;
@@ -94,22 +91,25 @@ pub async fn run() -> anyhow::Result<()> {
 
 /// Send a desktop notification via org.freedesktop.Notifications on the session bus.
 async fn notify(session: &Connection, summary: &str, body: &str) -> anyhow::Result<()> {
-    session.call_method(
-        Some("org.freedesktop.Notifications"),
-        "/org/freedesktop/Notifications",
-        Some("org.freedesktop.Notifications"),
-        "Notify",
-        &(
-            "powercurve",                                    // app_name
-            0u32,                                            // replaces_id
-            "",                                              // app_icon
-            summary,                                         // summary
-            body,                                            // body
-            Vec::<String>::new(),                             // actions
-            std::collections::HashMap::<String, zvariant::Value>::new(), // hints
-            5000i32,                                         // expire_timeout ms
-        ),
-    ).await.context("failed to send notification")?;
+    session
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "powercurve",                                                // app_name
+                0u32,                                                        // replaces_id
+                "",                                                          // app_icon
+                summary,                                                     // summary
+                body,                                                        // body
+                Vec::<String>::new(),                                        // actions
+                std::collections::HashMap::<String, zvariant::Value>::new(), // hints
+                5000i32,                                                     // expire_timeout ms
+            ),
+        )
+        .await
+        .context("failed to send notification")?;
 
     Ok(())
 }

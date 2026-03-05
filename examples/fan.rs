@@ -1,10 +1,10 @@
 use log::LevelFilter;
-use std::{process, thread, time};
 use powercurve::{
     fan::{FanDaemon, FanDaemonError},
     logging,
     nvml::NvidiaState,
 };
+use std::{process, thread, time};
 
 fn inner() -> Result<(), FanDaemonError> {
     let mut daemon = FanDaemon::new(NvidiaState::Absent);

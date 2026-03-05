@@ -9,8 +9,8 @@ use crate::pages;
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::{Length, Subscription};
-use cosmic::widget::{self, about::About, icon, menu, nav_bar};
 use cosmic::prelude::*;
+use cosmic::widget::{self, about::About, icon, menu, nav_bar};
 use std::collections::HashMap;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
@@ -245,22 +245,14 @@ impl cosmic::Application for AppModel {
 
     /// Render the active page based on nav bar selection.
     fn view(&self) -> Element<'_, Self::Message> {
-        let page = self
-            .nav
-            .active_data::<Page>()
-            .copied()
-            .unwrap_or(Page::Overview);
+        let page = self.nav.active_data::<Page>().copied().unwrap_or(Page::Overview);
 
         let content: Element<_> = match page {
             Page::Overview => pages::overview::view(self),
             Page::Fans => pages::fans::view(self),
         };
 
-        widget::container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(20)
-            .into()
+        widget::container(content).width(Length::Fill).height(Length::Fill).padding(20).into()
     }
 
     /// Register background subscriptions: config watcher, D-Bus poll, D-Bus signals.
@@ -291,11 +283,7 @@ impl cosmic::Application for AppModel {
                 self.profile = p;
             }
 
-            Message::ThermalEvent {
-                event_type,
-                profile,
-                ..
-            } => {
+            Message::ThermalEvent { event_type, profile, .. } => {
                 self.profile = profile;
                 if event_type == "critical" {
                     self.critical = true;
@@ -312,16 +300,10 @@ impl cosmic::Application for AppModel {
                 self.connected = true;
                 self.error_message = None;
                 self.profile = snap.profile.clone();
-                self.cpu_temp = if snap.cpu_temp >= 0 {
-                    Some(snap.cpu_temp as f64 / 1000.0)
-                } else {
-                    None
-                };
-                self.gpu_temp = if snap.gpu_temp >= 0 {
-                    Some(snap.gpu_temp as f64 / 1000.0)
-                } else {
-                    None
-                };
+                self.cpu_temp =
+                    if snap.cpu_temp >= 0 { Some(snap.cpu_temp as f64 / 1000.0) } else { None };
+                self.gpu_temp =
+                    if snap.gpu_temp >= 0 { Some(snap.gpu_temp as f64 / 1000.0) } else { None };
                 self.config_loaded = snap.config_loaded;
                 self.critical = snap.critical;
                 self.fan_curves = snap.curves.clone();
@@ -342,10 +324,7 @@ impl cosmic::Application for AppModel {
                 });
             }
 
-            Message::SetFanOverride {
-                channel,
-                duty_percent,
-            } => {
+            Message::SetFanOverride { channel, duty_percent } => {
                 return cosmic::task::future(async move {
                     match dbus::set_fan_override(&channel, duty_percent).await {
                         Ok(()) => cosmic::Action::App(Message::CommandOk),
@@ -426,24 +405,11 @@ impl AppModel {
             .duties
             .iter()
             .map(|(name, duty)| {
-                let rpm = snap
-                    .rpms
-                    .iter()
-                    .find(|(n, _)| n == name)
-                    .map(|(_, r)| *r)
-                    .unwrap_or(-1);
-                let min_duty = snap
-                    .min_duties
-                    .iter()
-                    .find(|(n, _)| n == name)
-                    .map(|(_, d)| *d)
-                    .unwrap_or(-1);
+                let rpm = snap.rpms.iter().find(|(n, _)| n == name).map(|(_, r)| *r).unwrap_or(-1);
+                let min_duty =
+                    snap.min_duties.iter().find(|(n, _)| n == name).map(|(_, d)| *d).unwrap_or(-1);
                 let stalled = snap.stalled.iter().any(|s| s == name);
-                let override_pct = snap
-                    .overrides
-                    .iter()
-                    .find(|(n, _)| n == name)
-                    .map(|(_, p)| *p);
+                let override_pct = snap.overrides.iter().find(|(n, _)| n == name).map(|(_, p)| *p);
                 let passthrough = snap.passthrough.iter().any(|p| p == name);
 
                 let label = self.fan_labels.get(name).cloned();

@@ -6,7 +6,12 @@
 
 use crate::nvml::NvidiaState;
 use serde::Deserialize;
-use std::{cmp, collections::HashMap, fs, io, sync::{Arc, Mutex as StdMutex}};
+use std::{
+    cmp,
+    collections::HashMap,
+    fs, io,
+    sync::{Arc, Mutex as StdMutex},
+};
 use sysfs_class::{HwMon, SysClass};
 
 pub(crate) const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
@@ -16,15 +21,15 @@ pub(crate) const CONFIG_PATH: &str = "/etc/powercurve/fan.toml";
 /// Top-level config file structure.
 #[derive(Deserialize)]
 pub(crate) struct FanConfig {
-    pub platform:          Option<String>,
+    pub platform: Option<String>,
     pub critical_cpu_temp: f32,
     pub critical_gpu_temp: f32,
-    pub hysteresis:        Option<f32>,
-    pub thermal_fallback:  Option<bool>,
-    pub thermal_cooldown:  Option<u32>,
-    pub curve:             Vec<CurvePoint>,
-    pub channels:          Vec<ChannelConfig>,
-    pub profiles:          Option<HashMap<String, ProfileConfig>>,
+    pub hysteresis: Option<f32>,
+    pub thermal_fallback: Option<bool>,
+    pub thermal_cooldown: Option<u32>,
+    pub curve: Vec<CurvePoint>,
+    pub channels: Vec<ChannelConfig>,
+    pub profiles: Option<HashMap<String, ProfileConfig>>,
 }
 
 /// Per-profile curve override. When a profile is active, its curve
@@ -54,14 +59,14 @@ pub(crate) struct ChannelProfileConfig {
 /// and per-channel-per-profile curve overrides.
 #[derive(Deserialize)]
 pub(crate) struct ChannelConfig {
-    pub pwm:      String,
-    pub source:   String,
-    pub min_duty:        Option<f32>,
-    pub stall_detect:    Option<bool>,
+    pub pwm: String,
+    pub source: String,
+    pub min_duty: Option<f32>,
+    pub stall_detect: Option<bool>,
     pub stall_threshold: Option<u32>,
-    pub passthrough:     Option<bool>,
-    pub curve:           Option<Vec<CurvePoint>>,
-    pub profiles:        Option<HashMap<String, ChannelProfileConfig>>,
+    pub passthrough: Option<bool>,
+    pub curve: Option<Vec<CurvePoint>>,
+    pub profiles: Option<HashMap<String, ChannelProfileConfig>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,65 +93,65 @@ pub enum TempSource {
 /// Maps a single PWM output to a temperature source and fan curve.
 #[derive(Clone, Debug)]
 pub struct FanChannel {
-    pub pwm:             String,
-    pub source:          TempSource,
-    pub curve:           FanCurve,
-    pub min_duty:        Option<u8>,
-    pub stall_detect:    bool,
+    pub pwm: String,
+    pub source: TempSource,
+    pub curve: FanCurve,
+    pub min_duty: Option<u8>,
+    pub stall_detect: bool,
     pub stall_threshold: u32,
-    pub passthrough:     bool,
+    pub passthrough: bool,
 }
 
 /// Stored per-channel definition from config, used to rebuild curves
 /// when the active profile changes.
 #[derive(Clone)]
 struct ChannelDef {
-    pwm:             String,
-    source:          TempSource,
-    override_curve:  Option<FanCurve>,
-    profile_curves:  HashMap<String, FanCurve>,
-    min_duty_byte:   Option<u8>,
-    stall_detect:    bool,
+    pwm: String,
+    source: TempSource,
+    override_curve: Option<FanCurve>,
+    profile_curves: HashMap<String, FanCurve>,
+    min_duty_byte: Option<u8>,
+    stall_detect: bool,
     stall_threshold: u32,
-    passthrough:     bool,
+    passthrough: bool,
 }
 
 /// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
 #[derive(Clone, Default)]
 pub struct FanStatus {
-    pub cpu_temp:       Option<u32>,
-    pub gpu_temp:       Option<u32>,
+    pub cpu_temp: Option<u32>,
+    pub gpu_temp: Option<u32>,
     pub channel_duties: Vec<(String, Option<u8>)>,
     pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
-    pub overrides:      HashMap<String, u8>,
-    pub min_duties:     Vec<(String, Option<u8>)>,
-    pub rpms:           Vec<(String, Option<u32>)>,
-    pub stalled:        Vec<String>,
-    pub passthrough:    Vec<String>,
-    pub critical:       bool,
-    pub config_loaded:  bool,
+    pub overrides: HashMap<String, u8>,
+    pub min_duties: Vec<(String, Option<u8>)>,
+    pub rpms: Vec<(String, Option<u32>)>,
+    pub stalled: Vec<String>,
+    pub passthrough: Vec<String>,
+    pub critical: bool,
+    pub config_loaded: bool,
 }
 
 pub struct FanDaemon {
-    channels:          Vec<FanChannel>,
-    channel_defs:      Vec<ChannelDef>,
-    shared_curve:      FanCurve,
-    profile_curves:    HashMap<String, FanCurve>,
+    channels: Vec<FanChannel>,
+    channel_defs: Vec<ChannelDef>,
+    shared_curve: FanCurve,
+    profile_curves: HashMap<String, FanCurve>,
     critical_cpu_temp: u32,
     critical_gpu_temp: u32,
-    hysteresis:        u32,
-    last_duties:       Vec<u8>,
-    last_temps:        Vec<Option<u32>>,
-    stall_counts:      Vec<u32>,
-    platform_names:    Vec<String>,
-    amdgpus:           Vec<HwMon>,
-    platforms:         Vec<HwMon>,
-    cpus:              Vec<HwMon>,
-    nvidia:            NvidiaState,
-    status:            Arc<StdMutex<FanStatus>>,
-    thermal_fallback:  bool,
-    thermal_cooldown:  u32,
-    current_profile:   String,
+    hysteresis: u32,
+    last_duties: Vec<u8>,
+    last_temps: Vec<Option<u32>>,
+    stall_counts: Vec<u32>,
+    platform_names: Vec<String>,
+    amdgpus: Vec<HwMon>,
+    platforms: Vec<HwMon>,
+    cpus: Vec<HwMon>,
+    nvidia: NvidiaState,
+    status: Arc<StdMutex<FanStatus>>,
+    thermal_fallback: bool,
+    thermal_cooldown: u32,
+    current_profile: String,
 }
 
 const DEFAULT_HYSTERESIS_C: f32 = 3.0;
@@ -202,40 +207,47 @@ impl FanDaemon {
                 .channels
                 .iter()
                 .map(|ch| {
-                    let profile_curves = ch.profiles.as_ref()
-                        .map(|p| p.iter()
-                            .map(|(name, pc)| (name.to_lowercase(), build_curve(&pc.curve)))
-                            .collect())
+                    let profile_curves = ch
+                        .profiles
+                        .as_ref()
+                        .map(|p| {
+                            p.iter()
+                                .map(|(name, pc)| (name.to_lowercase(), build_curve(&pc.curve)))
+                                .collect()
+                        })
                         .unwrap_or_default();
-                    let min_duty_byte = ch.min_duty.map(|pct| {
-                        ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8
-                    });
+                    let min_duty_byte = ch
+                        .min_duty
+                        .map(|pct| ((pct.clamp(0.0, 100.0) / 100.0) * 255.0).round() as u8);
                     ChannelDef {
-                        pwm:             ch.pwm.clone(),
-                        source:          parse_temp_source(&ch.source),
-                        override_curve:  ch.curve.as_deref().map(build_curve),
+                        pwm: ch.pwm.clone(),
+                        source: parse_temp_source(&ch.source),
+                        override_curve: ch.curve.as_deref().map(build_curve),
                         profile_curves,
                         min_duty_byte,
-                        stall_detect:    ch.stall_detect.unwrap_or(false),
+                        stall_detect: ch.stall_detect.unwrap_or(false),
                         stall_threshold: ch.stall_threshold.unwrap_or(3),
-                        passthrough:     ch.passthrough.unwrap_or(false),
+                        passthrough: ch.passthrough.unwrap_or(false),
                     }
                 })
                 .collect();
 
-            self.channels = self.channel_defs.iter().map(|def| {
-                FanChannel {
-                    pwm:             def.pwm.clone(),
-                    source:          def.source,
-                    curve:           def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
-                    min_duty:        def.min_duty_byte,
-                    stall_detect:    def.stall_detect,
+            self.channels = self
+                .channel_defs
+                .iter()
+                .map(|def| FanChannel {
+                    pwm: def.pwm.clone(),
+                    source: def.source,
+                    curve: def.override_curve.clone().unwrap_or_else(|| self.shared_curve.clone()),
+                    min_duty: def.min_duty_byte,
+                    stall_detect: def.stall_detect,
                     stall_threshold: def.stall_threshold,
-                    passthrough:     def.passthrough,
-                }
-            }).collect();
+                    passthrough: def.passthrough,
+                })
+                .collect();
 
-            self.profile_curves = config.profiles
+            self.profile_curves = config
+                .profiles
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(name, p)| (name.to_lowercase(), build_curve(&p.curve)))
@@ -244,9 +256,7 @@ impl FanDaemon {
             self.critical_cpu_temp = (config.critical_cpu_temp * 1000.0) as u32;
             self.critical_gpu_temp = (config.critical_gpu_temp * 1000.0) as u32;
             self.hysteresis = (config.hysteresis.unwrap_or(DEFAULT_HYSTERESIS_C) * 1000.0) as u32;
-            self.platform_names = config.platform
-                .map(|name| vec![name])
-                .unwrap_or_default();
+            self.platform_names = config.platform.map(|name| vec![name]).unwrap_or_default();
             self.thermal_fallback = config.thermal_fallback.unwrap_or(false);
             self.thermal_cooldown = config.thermal_cooldown.unwrap_or(30);
 
@@ -333,12 +343,14 @@ impl FanDaemon {
     /// 4. Shared top-level curve (fallback)
     pub fn set_profile(&mut self, profile: &str) {
         self.current_profile = profile.to_lowercase();
-        let global_curve = self.profile_curves.get(&self.current_profile)
-            .unwrap_or(&self.shared_curve);
+        let global_curve =
+            self.profile_curves.get(&self.current_profile).unwrap_or(&self.shared_curve);
 
         for (i, def) in self.channel_defs.iter().enumerate() {
             if let Some(ch) = self.channels.get_mut(i) {
-                ch.curve = def.profile_curves.get(&self.current_profile)
+                ch.curve = def
+                    .profile_curves
+                    .get(&self.current_profile)
                     .or(def.override_curve.as_ref())
                     .unwrap_or(global_curve)
                     .clone();
@@ -488,8 +500,7 @@ impl FanDaemon {
     /// sensor doesn't exist or can't be read.
     fn read_fan_rpm(&self, pwm: &str) -> Option<u32> {
         let idx: u64 = pwm.strip_prefix("pwm")?.parse().ok()?;
-        self.platforms.iter()
-            .find_map(|p| p.fan(idx).ok().and_then(|f| f.input().ok()))
+        self.platforms.iter().find_map(|p| p.fan(idx).ok().and_then(|f| f.input().ok()))
     }
 
     /// Fallback duty for stall recovery when no min_duty is configured.
@@ -539,7 +550,10 @@ impl FanDaemon {
                     }
 
                     // Temporary override bypasses curve evaluation entirely.
-                    let override_duty = self.status.lock().ok()
+                    let override_duty = self
+                        .status
+                        .lock()
+                        .ok()
                         .and_then(|s| s.overrides.get(&channel.pwm).copied());
                     if let Some(duty) = override_duty {
                         self.set_channel_duty(&channel.pwm, Some(duty));
@@ -579,18 +593,15 @@ impl FanDaemon {
                     // Apply minimum duty floor if configured.
                     let floored_duty = match (effective_duty, channel.min_duty) {
                         (Some(d), Some(floor)) => Some(d.max(floor)),
-                        (None, Some(floor))    => Some(floor),
-                        (duty, None)           => duty,
+                        (None, Some(floor)) => Some(floor),
+                        (duty, None) => duty,
                     };
 
                     // Stall detection: if duty > 0 but RPM reads 0, the fan
                     // may have stalled. Bump to floor or fallback after
                     // consecutive zero-RPM reads exceed the threshold.
-                    let rpm = if channel.stall_detect {
-                        self.read_fan_rpm(&channel.pwm)
-                    } else {
-                        None
-                    };
+                    let rpm =
+                        if channel.stall_detect { self.read_fan_rpm(&channel.pwm) } else { None };
 
                     let final_duty = if channel.stall_detect {
                         let is_spinning = floored_duty.is_some_and(|d| d > 0);
@@ -599,11 +610,11 @@ impl FanDaemon {
                         if is_spinning && rpm_zero {
                             self.stall_counts[i] += 1;
                             if self.stall_counts[i] >= channel.stall_threshold {
-                                let bump = channel.min_duty
-                                    .unwrap_or(Self::STALL_FALLBACK_DUTY);
+                                let bump = channel.min_duty.unwrap_or(Self::STALL_FALLBACK_DUTY);
                                 log::warn!(
                                     "{}: fan stalled (0 RPM with duty > 0), bumping to {}",
-                                    channel.pwm, bump
+                                    channel.pwm,
+                                    bump
                                 );
                                 stalled.push(channel.pwm.clone());
                                 Some(floored_duty.map_or(bump, |d| d.max(bump)))
@@ -628,17 +639,23 @@ impl FanDaemon {
                 s.cpu_temp = cpu_temp;
                 s.gpu_temp = gpu_temp;
                 s.channel_duties = duties;
-                s.channel_curves = self.channels.iter()
+                s.channel_curves = self
+                    .channels
+                    .iter()
                     .filter(|ch| !ch.passthrough)
                     .map(|ch| (ch.pwm.clone(), ch.curve.to_display_points()))
                     .collect();
-                s.min_duties = self.channels.iter()
+                s.min_duties = self
+                    .channels
+                    .iter()
                     .filter(|ch| !ch.passthrough)
                     .map(|ch| (ch.pwm.clone(), ch.min_duty))
                     .collect();
                 s.rpms = rpms;
                 s.stalled = stalled;
-                s.passthrough = self.channels.iter()
+                s.passthrough = self
+                    .channels
+                    .iter()
                     .filter(|ch| ch.passthrough)
                     .map(|ch| ch.pwm.clone())
                     .collect();
@@ -652,10 +669,14 @@ impl FanDaemon {
     }
 
     /// Whether thermal fallback is enabled in the config.
-    pub fn thermal_fallback_enabled(&self) -> bool { self.thermal_fallback }
+    pub fn thermal_fallback_enabled(&self) -> bool {
+        self.thermal_fallback
+    }
 
     /// Cooldown period in seconds before stepping back up after thermal fallback.
-    pub fn thermal_cooldown_secs(&self) -> u32 { self.thermal_cooldown }
+    pub fn thermal_cooldown_secs(&self) -> u32 {
+        self.thermal_cooldown
+    }
 }
 
 impl Drop for FanDaemon {
@@ -664,7 +685,9 @@ impl Drop for FanDaemon {
             return;
         }
         for channel in &self.channels {
-            if channel.passthrough { continue; }
+            if channel.passthrough {
+                continue;
+            }
             self.set_channel_duty(&channel.pwm, None);
         }
     }
@@ -719,7 +742,9 @@ pub struct FanPoint {
 }
 
 impl FanPoint {
-    pub const fn new(temp: i16, duty: u16) -> Self { Self { temp, duty } }
+    pub const fn new(temp: i16, duty: u16) -> Self {
+        Self { temp, duty }
+    }
 
     /// Find the duty between two points and a given temperature, if the temperature
     /// lies within this range.
@@ -786,9 +811,7 @@ impl FanCurve {
 
     /// Return curve points as (Celsius, percent) tuples for display.
     pub fn to_display_points(&self) -> Vec<(f32, f32)> {
-        self.points.iter().map(|p| {
-            (f32::from(p.temp) / 100.0, f32::from(p.duty) / 100.0)
-        }).collect()
+        self.points.iter().map(|p| (f32::from(p.temp) / 100.0, f32::from(p.duty) / 100.0)).collect()
     }
 
     pub fn get_duty(&self, temp: i16) -> Option<u16> {

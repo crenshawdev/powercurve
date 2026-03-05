@@ -125,7 +125,7 @@ dynamic_parameters! {
 
 #[derive(Default)]
 pub struct Dirty {
-    expire:    DirtyExpire,
+    expire: DirtyExpire,
     writeback: DirtyWriteback,
 }
 

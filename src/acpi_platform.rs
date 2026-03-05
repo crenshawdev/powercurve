@@ -26,7 +26,9 @@ pub fn choices() -> impl Iterator<Item = &'static str> {
 
 /// Checks if the system supports ACPI platform profiles.
 #[must_use]
-pub fn supported() -> bool { Path::new(SYSFS_PATH).exists() }
+pub fn supported() -> bool {
+    Path::new(SYSFS_PATH).exists()
+}
 
 /// Applies the `low-power` or `quiet` ACPI platform profile.
 pub fn quiet() {
@@ -53,10 +55,14 @@ pub fn quiet() {
 }
 
 /// Applies the balanced ACPI platform profile.
-pub fn balanced() { apply_profile("balanced"); }
+pub fn balanced() {
+    apply_profile("balanced");
+}
 
 /// Applies the performance ACPI platform profile.
-pub fn performance() { apply_profile("performance"); }
+pub fn performance() {
+    apply_profile("performance");
+}
 
 /// Applies the ACPI platform profile.
 fn apply_profile(profile: &str) {

@@ -1,6 +1,6 @@
 use log::LevelFilter;
-use std::{io, process};
 use powercurve::{graphics::Graphics, logging};
+use std::{io, process};
 
 fn inner() -> io::Result<()> {
     Graphics::new()?;

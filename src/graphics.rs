@@ -13,20 +13,24 @@ pub struct GraphicsDevice {
 
 impl GraphicsDevice {
     #[must_use]
-    pub fn new(functions: Vec<PciDevice>) -> Self { Self { functions } }
+    pub fn new(functions: Vec<PciDevice>) -> Self {
+        Self { functions }
+    }
 
     /// Whether any of this device's PCI functions still exist in sysfs.
     #[must_use]
-    pub fn exists(&self) -> bool { self.functions.iter().any(|func| func.path().exists()) }
+    pub fn exists(&self) -> bool {
+        self.functions.iter().any(|func| func.path().exists())
+    }
 }
 
 /// Enumerates GPUs on the PCI bus, grouped by vendor.
 pub struct Graphics {
-    pub bus:    PciBus,
-    pub amd:    Vec<GraphicsDevice>,
-    pub intel:  Vec<GraphicsDevice>,
+    pub bus: PciBus,
+    pub amd: Vec<GraphicsDevice>,
+    pub intel: Vec<GraphicsDevice>,
     pub nvidia: Vec<GraphicsDevice>,
-    pub other:  Vec<GraphicsDevice>,
+    pub other: Vec<GraphicsDevice>,
 }
 
 impl Graphics {

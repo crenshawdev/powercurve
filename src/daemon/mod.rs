@@ -14,7 +14,7 @@ use std::{
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
-    sync::{Mutex, watch},
+    sync::{watch, Mutex},
     time::sleep,
 };
 use zbus::Interface;
@@ -24,9 +24,8 @@ use crate::{
     fan::{FanDaemon, FanStatus},
     graphics::Graphics,
     kernel_parameters::{KernelParameter, NmiWatchdog},
-    nvml::{NvmlHandle, NvidiaState},
-    state,
-    DBUS_NAME, DBUS_PATH,
+    nvml::{NvidiaState, NvmlHandle},
+    state, DBUS_NAME, DBUS_PATH,
 };
 
 use std::sync::Mutex as StdMutex;
@@ -72,15 +71,17 @@ async fn sighup_handling() {
 // Enabled by default. Set S76_POWER_PCI_RUNTIME_PM=0 to disable if your system
 // has ACPI resume issues.
 static PCI_RUNTIME_PM: AtomicBool = AtomicBool::new(true);
-pub(crate) fn pci_runtime_pm_support() -> bool { PCI_RUNTIME_PM.load(Ordering::SeqCst) }
+pub(crate) fn pci_runtime_pm_support() -> bool {
+    PCI_RUNTIME_PM.load(Ordering::SeqCst)
+}
 
 struct PowerDaemon {
-    power_profile:    String,
-    profile_errors:   Vec<ProfileError>,
-    held_profiles:    Vec<(u32, &'static str, String, String)>,
-    profile_ids:      u32,
-    connections:      Option<(zbus::Connection, zbus::Connection, zbus::Connection)>,
-    profile_tx:       watch::Sender<String>,
+    power_profile: String,
+    profile_errors: Vec<ProfileError>,
+    held_profiles: Vec<(u32, &'static str, String, String)>,
+    profile_ids: u32,
+    connections: Option<(zbus::Connection, zbus::Connection, zbus::Connection)>,
+    profile_tx: watch::Sender<String>,
 }
 
 impl PowerDaemon {
@@ -235,77 +236,71 @@ impl PowerService {
     /// Return CPU and GPU temps in millidegrees as a two-element array.
     #[dbus_interface(out_args("cpu_temp", "gpu_temp"))]
     async fn get_temperatures(&self) -> zbus::fdo::Result<(i64, i64)> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
-        Ok((
-            status.cpu_temp.map_or(-1, |t| t as i64),
-            status.gpu_temp.map_or(-1, |t| t as i64),
-        ))
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+        Ok((status.cpu_temp.map_or(-1, |t| t as i64), status.gpu_temp.map_or(-1, |t| t as i64)))
     }
 
     /// Return each fan channel's current duty as (name, duty_byte) pairs.
     #[dbus_interface(out_args("duties"))]
     async fn get_fan_duties(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
-        Ok(status.channel_duties.iter().map(|(name, duty)| {
-            (name.clone(), duty.map_or(-1, |d| d as i32))
-        }).collect())
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+        Ok(status
+            .channel_duties
+            .iter()
+            .map(|(name, duty)| (name.clone(), duty.map_or(-1, |d| d as i32)))
+            .collect())
     }
 
     /// Return whether the fan config is loaded and whether we're in critical state.
     #[dbus_interface(out_args("config_loaded", "critical"))]
     async fn get_fan_config_status(&self) -> zbus::fdo::Result<(bool, bool)> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok((status.config_loaded, status.critical))
     }
 
     /// Return the active curve for each channel as (name, [(temp_c, duty_pct)]) pairs.
     #[dbus_interface(out_args("curves"))]
     async fn get_fan_curves(&self) -> zbus::fdo::Result<Vec<(String, Vec<(f64, f64)>)>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
-        Ok(status.channel_curves.iter().map(|(name, pts)| {
-            (name.clone(), pts.iter().map(|(t, d)| (*t as f64, *d as f64)).collect())
-        }).collect())
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+        Ok(status
+            .channel_curves
+            .iter()
+            .map(|(name, pts)| {
+                (name.clone(), pts.iter().map(|(t, d)| (*t as f64, *d as f64)).collect())
+            })
+            .collect())
     }
 
     /// Return currently active fan overrides as (channel, duty_percent) pairs.
     #[dbus_interface(out_args("overrides"))]
     async fn get_fan_overrides(&self) -> zbus::fdo::Result<Vec<(String, u8)>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
-        Ok(status.overrides.iter().map(|(k, v)| {
-            (k.clone(), (((*v as u16) * 100) / 255) as u8)
-        }).collect())
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+        Ok(status
+            .overrides
+            .iter()
+            .map(|(k, v)| (k.clone(), (((*v as u16) * 100) / 255) as u8))
+            .collect())
     }
 
     /// Temporarily override a fan channel's duty cycle. Lasts until the
     /// next profile change or until explicitly cleared.
-    async fn set_fan_override(
-        &self,
-        channel: &str,
-        duty_percent: u8,
-    ) -> zbus::fdo::Result<()> {
+    async fn set_fan_override(&self, channel: &str, duty_percent: u8) -> zbus::fdo::Result<()> {
         let duty_byte = ((duty_percent.min(100) as u16) * 255 / 100) as u8;
-        let mut status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
+        let mut status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         status.overrides.insert(channel.to_string(), duty_byte);
         Ok(())
     }
 
     /// Clear a temporary fan override, returning the channel to curve control.
     async fn clear_fan_override(&self, channel: &str) -> zbus::fdo::Result<()> {
-        let mut status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
+        let mut status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         status.overrides.remove(channel);
         Ok(())
     }
@@ -314,41 +309,41 @@ impl PowerService {
     /// Channels without a floor report -1.
     #[dbus_interface(out_args("min_duties"))]
     async fn get_fan_min_duties(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
-        Ok(status.min_duties.iter().map(|(name, floor)| {
-            (name.clone(), floor.map_or(-1, |d| d as i32))
-        }).collect())
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+        Ok(status
+            .min_duties
+            .iter()
+            .map(|(name, floor)| (name.clone(), floor.map_or(-1, |d| d as i32)))
+            .collect())
     }
 
     /// Return each channel's current RPM reading as (name, rpm) pairs.
     /// Channels without a tachometer report -1.
     #[dbus_interface(out_args("rpms"))]
     async fn get_fan_rpms(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
-        Ok(status.rpms.iter().map(|(name, rpm)| {
-            (name.clone(), rpm.map_or(-1, |r| r as i32))
-        }).collect())
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+        Ok(status
+            .rpms
+            .iter()
+            .map(|(name, rpm)| (name.clone(), rpm.map_or(-1, |r| r as i32)))
+            .collect())
     }
 
     /// Return the names of channels in passthrough mode.
     #[dbus_interface(out_args("channels"))]
     async fn get_passthrough_channels(&self) -> zbus::fdo::Result<Vec<String>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status.passthrough.clone())
     }
 
     /// Return the names of any channels currently detected as stalled.
     #[dbus_interface(out_args("stalled"))]
     async fn get_stalled_fans(&self) -> zbus::fdo::Result<Vec<String>> {
-        let status = self.1.lock().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("status lock: {}", e))
-        })?;
+        let status =
+            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status.stalled.clone())
     }
 
@@ -495,19 +490,29 @@ impl UPowerPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn performance_degraded(&self) -> &str { "" }
+    async fn performance_degraded(&self) -> &str {
+        ""
+    }
 
     #[dbus_interface(property)]
-    async fn performance_inhibited(&self) -> &str { "" }
+    async fn performance_inhibited(&self) -> &str {
+        ""
+    }
 
     #[dbus_interface(property)]
-    async fn active_profile_holds(&self) -> Vec<HashMap<String, zvariant::Value<'_>>> { Vec::new() }
+    async fn active_profile_holds(&self) -> Vec<HashMap<String, zvariant::Value<'_>>> {
+        Vec::new()
+    }
 
     #[dbus_interface(property)]
-    async fn actions(&self) -> Vec<String> { vec![] }
+    async fn actions(&self) -> Vec<String> {
+        vec![]
+    }
 
     #[dbus_interface(property)]
-    async fn version(&self) -> &str { env!("CARGO_PKG_VERSION") }
+    async fn version(&self) -> &str {
+        env!("CARGO_PKG_VERSION")
+    }
 }
 
 pub struct NetHadessPowerProfiles(UPowerPowerProfiles);
@@ -515,7 +520,9 @@ pub struct NetHadessPowerProfiles(UPowerPowerProfiles);
 #[zbus::dbus_interface(name = "net.hadess.PowerProfiles")]
 impl NetHadessPowerProfiles {
     #[dbus_interface(property)]
-    async fn active_profile(&self) -> &str { self.0.active_profile().await }
+    async fn active_profile(&self) -> &str {
+        self.0.active_profile().await
+    }
 
     #[dbus_interface(property)]
     async fn set_active_profile(&mut self, profile: &str) {
@@ -523,7 +530,9 @@ impl NetHadessPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn performance_inhibited(&self) -> &str { self.0.performance_inhibited().await }
+    async fn performance_inhibited(&self) -> &str {
+        self.0.performance_inhibited().await
+    }
 
     #[dbus_interface(property)]
     async fn profiles(&self) -> Vec<HashMap<&'static str, zvariant::Value<'_>>> {
@@ -531,16 +540,17 @@ impl NetHadessPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn actions(&self) -> Vec<String> { self.0.actions().await }
+    async fn actions(&self) -> Vec<String> {
+        self.0.actions().await
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn daemon() -> anyhow::Result<()> {
     let signal_handling_fut = signal_handling();
 
-    let pci_runtime_pm = std::env::var("S76_POWER_PCI_RUNTIME_PM")
-        .map(|v| v != "0")
-        .unwrap_or(true);
+    let pci_runtime_pm =
+        std::env::var("S76_POWER_PCI_RUNTIME_PM").map(|v| v != "0").unwrap_or(true);
 
     PCI_RUNTIME_PM.store(pci_runtime_pm, Ordering::SeqCst);
 
@@ -570,11 +580,9 @@ pub async fn daemon() -> anyhow::Result<()> {
     let mut power_service = PowerService(daemon.clone(), fan_status);
 
     // powerprofilesctl
-    let upp_connection = connect_dbus(
-        POWER_PROFILES_DBUS_NAME,
-        POWER_PROFILES_DBUS_PATH,
-        || UPowerPowerProfiles(daemon.clone()),
-    )
+    let upp_connection = connect_dbus(POWER_PROFILES_DBUS_NAME, POWER_PROFILES_DBUS_PATH, || {
+        UPowerPowerProfiles(daemon.clone())
+    })
     .await?;
 
     // gnome-shell
@@ -618,7 +626,8 @@ pub async fn daemon() -> anyhow::Result<()> {
         let mut fallback_pending = false;
         let mut original_profile: Option<String> = None;
         let mut cool_ticks: u32 = 0;
-        let mut stall_signalled: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut stall_signalled: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
@@ -665,7 +674,9 @@ pub async fn daemon() -> anyhow::Result<()> {
                         fallback_pending = true;
                         cool_ticks = 0;
 
-                        let temp = fan_daemon.status_handle().lock()
+                        let temp = fan_daemon
+                            .status_handle()
+                            .lock()
                             .map(|s| s.cpu_temp.unwrap_or(0).max(s.gpu_temp.unwrap_or(0)))
                             .unwrap_or(0);
 
@@ -676,8 +687,12 @@ pub async fn daemon() -> anyhow::Result<()> {
                         };
 
                         let _ = PowerService::thermal_event(
-                            &thermal_context, "fallback_down", temp as i64, target,
-                        ).await;
+                            &thermal_context,
+                            "fallback_down",
+                            temp as i64,
+                            target,
+                        )
+                        .await;
                     }
                 } else if fallback_active && !critical {
                     cool_ticks += 1;
@@ -686,14 +701,22 @@ pub async fn daemon() -> anyhow::Result<()> {
                             log::info!("thermal recovery: restoring profile {}", orig);
                             fallback_pending = true;
                             let _ = match orig.as_str() {
-                                "Performance" => thermal_service.performance(thermal_context.clone()).await,
-                                "Balanced" => thermal_service.balanced(thermal_context.clone()).await,
+                                "Performance" => {
+                                    thermal_service.performance(thermal_context.clone()).await
+                                }
+                                "Balanced" => {
+                                    thermal_service.balanced(thermal_context.clone()).await
+                                }
                                 _ => thermal_service.quiet(thermal_context.clone()).await,
                             };
 
                             let _ = PowerService::thermal_event(
-                                &thermal_context, "fallback_up", 0, orig,
-                            ).await;
+                                &thermal_context,
+                                "fallback_up",
+                                0,
+                                orig,
+                            )
+                            .await;
                         }
                         fallback_active = false;
                         original_profile = None;
@@ -705,19 +728,20 @@ pub async fn daemon() -> anyhow::Result<()> {
             }
 
             // Emit stall signals for newly stalled channels.
-            let (current_stalled, current_duties) = fan_daemon.status_handle().lock()
+            let (current_stalled, current_duties) = fan_daemon
+                .status_handle()
+                .lock()
                 .map(|s| (s.stalled.clone(), s.channel_duties.clone()))
                 .unwrap_or_default();
 
             for ch in &current_stalled {
                 if stall_signalled.insert(ch.clone()) {
-                    let duty_pct = current_duties.iter()
+                    let duty_pct = current_duties
+                        .iter()
                         .find(|(name, _)| name == ch)
                         .and_then(|(_, d)| d.map(|v| ((v as u16 * 100) / 255) as u8))
                         .unwrap_or(0);
-                    let _ = PowerService::stall_event(
-                        &thermal_context, ch, duty_pct,
-                    ).await;
+                    let _ = PowerService::stall_event(&thermal_context, ch, duty_pct).await;
                 }
             }
 

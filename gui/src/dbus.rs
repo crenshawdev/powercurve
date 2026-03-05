@@ -92,7 +92,8 @@ pub fn signal_subscription() -> Subscription<Message> {
                     }
 
                     Ok(())
-                }.await;
+                }
+                .await;
 
                 if result.is_err() {
                     let _ = tx.send(Message::DaemonDisconnected).await;
