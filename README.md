@@ -24,7 +24,7 @@ after, stick with `power-profiles-daemon` on laptops.
 
 ### Arch
 
-Available from the [VintageTechie Arch repo](https://gitlab.com/vintagetechie/powercurve/-/releases):
+Available from the [VintageTechie Arch repo](https://vintagetechie.gitlab.io/vintagetechie-arch-repo/):
 
 ```
 sudo pacman -S powercurve-git
