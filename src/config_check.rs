@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::fan::{self, CONFIG_PATH, FanConfig};
+use crate::fan::{self, FanConfig, CONFIG_PATH};
 use std::fs;
 use sysfs_class::{HwMon, SysClass};
 
@@ -13,7 +13,7 @@ pub(crate) enum Severity {
 
 pub(crate) struct Issue {
     pub severity: Severity,
-    pub message:  String,
+    pub message: String,
 }
 
 impl Issue {
@@ -100,7 +100,10 @@ fn validate_curve(points: &[fan::CurvePoint], label: &str, issues: &mut Vec<Issu
         if i > 0 && point.temp <= points[i - 1].temp {
             issues.push(Issue::error(format!(
                 "{} curve point {}: temp {:.1}C is not greater than previous {:.1}C",
-                label, i, point.temp, points[i - 1].temp,
+                label,
+                i,
+                point.temp,
+                points[i - 1].temp,
             )));
         }
     }
@@ -149,7 +152,9 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
 
     for (i, ch) in config.channels.iter().enumerate() {
         if ch.passthrough == Some(true) {
-            if ch.curve.is_some() || ch.profiles.is_some() || ch.min_duty.is_some()
+            if ch.curve.is_some()
+                || ch.profiles.is_some()
+                || ch.min_duty.is_some()
                 || ch.stall_detect.is_some()
             {
                 issues.push(Issue::warning(format!(
@@ -237,10 +242,7 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
         }
     };
 
-    let names: Vec<String> = hwmons
-        .iter()
-        .filter_map(|h| h.name().ok())
-        .collect();
+    let names: Vec<String> = hwmons.iter().filter_map(|h| h.name().ok()).collect();
 
     if let Some(ref platform) = config.platform {
         if !names.iter().any(|n| n == platform) {
@@ -251,14 +253,15 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
         }
     }
 
-    let has_cpu_hwmon = names.iter().any(|n| {
-        matches!(n.as_str(), "coretemp" | "k10temp" | "zenpower" | "apm_xgene")
-    });
+    let has_cpu_hwmon = names
+        .iter()
+        .any(|n| matches!(n.as_str(), "coretemp" | "k10temp" | "zenpower" | "apm_xgene"));
 
     let needs_cpu = config.channels.iter().any(|ch| ch.source == "cpu" || ch.source == "all");
     if needs_cpu && !has_cpu_hwmon {
         issues.push(Issue::warning(
-            "channels reference cpu temps but no cpu hwmon found (coretemp, k10temp, zenpower)".to_string(),
+            "channels reference cpu temps but no cpu hwmon found (coretemp, k10temp, zenpower)"
+                .to_string(),
         ));
     }
 
@@ -266,7 +269,8 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
     let needs_gpu = config.channels.iter().any(|ch| ch.source == "gpu" || ch.source == "all");
     if needs_gpu && !has_gpu_hwmon {
         issues.push(Issue::warning(
-            "channels reference gpu temps but no amdgpu hwmon found (NVIDIA uses NVML at runtime)".to_string(),
+            "channels reference gpu temps but no amdgpu hwmon found (NVIDIA uses NVML at runtime)"
+                .to_string(),
         ));
     }
 }
@@ -280,34 +284,43 @@ mod tests {
     /// Build a minimal valid config for testing.
     fn valid_config() -> FanConfig {
         FanConfig {
-            platform:          None,
+            platform: None,
             critical_cpu_temp: 80.0,
             critical_gpu_temp: 75.0,
-            hysteresis:        None,
-            thermal_fallback:  None,
-            thermal_cooldown:  None,
-            curve:             vec![
+            hysteresis: None,
+            thermal_fallback: None,
+            thermal_cooldown: None,
+            curve: vec![
                 CurvePoint { temp: 30.0, duty: 10.0 },
                 CurvePoint { temp: 50.0, duty: 50.0 },
                 CurvePoint { temp: 75.0, duty: 100.0 },
             ],
-            channels:          vec![
-                ChannelConfig { pwm: "pwm1".into(), source: "cpu".into(), min_duty: None, stall_detect: None, stall_threshold: None, passthrough: None, curve: None, profiles: None},
-            ],
-            profiles:          None,
+            channels: vec![ChannelConfig {
+                pwm: "pwm1".into(),
+                source: "cpu".into(),
+                min_duty: None,
+                stall_detect: None,
+                stall_threshold: None,
+                passthrough: None,
+                curve: None,
+                profiles: None,
+            }],
+            profiles: None,
         }
     }
 
     /// Filter issues to just errors or just warnings.
     fn errors(issues: &[Issue]) -> Vec<&str> {
-        issues.iter()
+        issues
+            .iter()
             .filter(|i| i.severity == Severity::Error)
             .map(|i| i.message.as_str())
             .collect()
     }
 
     fn warnings(issues: &[Issue]) -> Vec<&str> {
-        issues.iter()
+        issues
+            .iter()
             .filter(|i| i.severity == Severity::Warning)
             .map(|i| i.message.as_str())
             .collect()
@@ -328,10 +341,8 @@ mod tests {
     #[test]
     fn curve_not_monotonic() {
         let mut config = valid_config();
-        config.curve = vec![
-            CurvePoint { temp: 50.0, duty: 50.0 },
-            CurvePoint { temp: 30.0, duty: 10.0 },
-        ];
+        config.curve =
+            vec![CurvePoint { temp: 50.0, duty: 50.0 }, CurvePoint { temp: 30.0, duty: 10.0 }];
         let mut issues = Vec::new();
         validate_curve(&config.curve, "shared", &mut issues);
         assert_eq!(errors(&issues).len(), 1);
@@ -341,10 +352,8 @@ mod tests {
     #[test]
     fn duty_out_of_range() {
         let mut config = valid_config();
-        config.curve = vec![
-            CurvePoint { temp: 30.0, duty: -5.0 },
-            CurvePoint { temp: 50.0, duty: 110.0 },
-        ];
+        config.curve =
+            vec![CurvePoint { temp: 30.0, duty: -5.0 }, CurvePoint { temp: 50.0, duty: 110.0 }];
         let mut issues = Vec::new();
         validate_curve(&config.curve, "shared", &mut issues);
         assert_eq!(errors(&issues).len(), 2);
@@ -364,9 +373,10 @@ mod tests {
     fn unknown_profile_name() {
         let mut config = valid_config();
         let mut profiles = HashMap::new();
-        profiles.insert("turbo".into(), ProfileConfig {
-            curve: vec![CurvePoint { temp: 30.0, duty: 80.0 }],
-        });
+        profiles.insert(
+            "turbo".into(),
+            ProfileConfig { curve: vec![CurvePoint { temp: 30.0, duty: 80.0 }] },
+        );
         config.profiles = Some(profiles);
         let mut issues = Vec::new();
         validate_profiles(&config, &mut issues);
@@ -412,9 +422,16 @@ mod tests {
     #[test]
     fn unknown_source_is_warning() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig { pwm: "pwm1".into(), source: "memory".into(), min_duty: None, stall_detect: None, stall_threshold: None, passthrough: None, curve: None, profiles: None},
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "memory".into(),
+            min_duty: None,
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(warnings(&issues).len(), 1);
@@ -425,21 +442,20 @@ mod tests {
     fn channel_profile_unknown_name_is_warning() {
         let mut config = valid_config();
         let mut profiles = HashMap::new();
-        profiles.insert("turbo".into(), ChannelProfileConfig {
-            curve: vec![CurvePoint { temp: 30.0, duty: 10.0 }],
-        });
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm1".into(),
-                source: "cpu".into(),
-                min_duty: None,
-                stall_detect: None,
-                stall_threshold: None,
-                passthrough: None,
-                curve: None,
-                profiles: Some(profiles),
-            },
-        ];
+        profiles.insert(
+            "turbo".into(),
+            ChannelProfileConfig { curve: vec![CurvePoint { temp: 30.0, duty: 10.0 }] },
+        );
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: None,
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: None,
+            profiles: Some(profiles),
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(warnings(&issues).len(), 1);
@@ -449,18 +465,16 @@ mod tests {
     #[test]
     fn min_duty_out_of_range() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm1".into(),
-                source: "cpu".into(),
-                min_duty: Some(150.0),
-                stall_detect: None,
-                stall_threshold: None,
-                passthrough: None,
-                curve: None,
-                profiles: None,
-            },
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: Some(150.0),
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(errors(&issues).len(), 1);
@@ -470,18 +484,16 @@ mod tests {
     #[test]
     fn min_duty_valid() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm1".into(),
-                source: "cpu".into(),
-                min_duty: Some(15.0),
-                stall_detect: None,
-                stall_threshold: None,
-                passthrough: None,
-                curve: None,
-                profiles: None,
-            },
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: Some(15.0),
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert!(errors(&issues).is_empty());
@@ -491,24 +503,25 @@ mod tests {
     fn channel_profile_bad_curve_is_error() {
         let mut config = valid_config();
         let mut profiles = HashMap::new();
-        profiles.insert("quiet".into(), ChannelProfileConfig {
-            curve: vec![
-                CurvePoint { temp: 50.0, duty: 50.0 },
-                CurvePoint { temp: 30.0, duty: 10.0 },
-            ],
-        });
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm1".into(),
-                source: "cpu".into(),
-                min_duty: None,
-                stall_detect: None,
-                stall_threshold: None,
-                passthrough: None,
-                curve: None,
-                profiles: Some(profiles),
+        profiles.insert(
+            "quiet".into(),
+            ChannelProfileConfig {
+                curve: vec![
+                    CurvePoint { temp: 50.0, duty: 50.0 },
+                    CurvePoint { temp: 30.0, duty: 10.0 },
+                ],
             },
-        ];
+        );
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: None,
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: None,
+            profiles: Some(profiles),
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(errors(&issues).len(), 1);
@@ -518,18 +531,16 @@ mod tests {
     #[test]
     fn stall_threshold_out_of_range() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm1".into(),
-                source: "cpu".into(),
-                min_duty: None,
-                stall_detect: Some(true),
-                stall_threshold: Some(0),
-                passthrough: None,
-                curve: None,
-                profiles: None,
-            },
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: None,
+            stall_detect: Some(true),
+            stall_threshold: Some(0),
+            passthrough: None,
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(errors(&issues).len(), 1);
@@ -544,18 +555,16 @@ mod tests {
     #[test]
     fn stall_threshold_valid() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm1".into(),
-                source: "cpu".into(),
-                min_duty: None,
-                stall_detect: Some(true),
-                stall_threshold: Some(5),
-                passthrough: None,
-                curve: None,
-                profiles: None,
-            },
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: None,
+            stall_detect: Some(true),
+            stall_threshold: Some(5),
+            passthrough: None,
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert!(errors(&issues).is_empty());
@@ -564,18 +573,16 @@ mod tests {
     #[test]
     fn passthrough_skips_validation() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm4".into(),
-                source: "all".into(),
-                min_duty: None,
-                stall_detect: None,
-                stall_threshold: None,
-                passthrough: Some(true),
-                curve: None,
-                profiles: None,
-            },
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm4".into(),
+            source: "all".into(),
+            min_duty: None,
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: Some(true),
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert!(errors(&issues).is_empty());
@@ -585,18 +592,16 @@ mod tests {
     #[test]
     fn passthrough_warns_on_ignored_settings() {
         let mut config = valid_config();
-        config.channels = vec![
-            ChannelConfig {
-                pwm: "pwm4".into(),
-                source: "all".into(),
-                min_duty: Some(25.0),
-                stall_detect: None,
-                stall_threshold: None,
-                passthrough: Some(true),
-                curve: None,
-                profiles: None,
-            },
-        ];
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm4".into(),
+            source: "all".into(),
+            min_duty: Some(25.0),
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: Some(true),
+            curve: None,
+            profiles: None,
+        }];
         let mut issues = Vec::new();
         validate_channels(&config, &mut issues);
         assert_eq!(warnings(&issues).len(), 1);

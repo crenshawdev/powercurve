@@ -24,7 +24,7 @@ after, stick with `power-profiles-daemon` on laptops.
 
 ### Arch
 
-Available from the [VintageTechie Arch repo](https://vintagetechie.codeberg.page/vintagetechie-arch-repo/):
+Available from the [VintageTechie Arch repo](https://vintagetechie.gitlab.io/vintagetechie-arch-repo/):
 
 ```
 sudo pacman -S powercurve-git
@@ -33,7 +33,7 @@ sudo pacman -S powercurve-git
 ### Debian / Ubuntu / Pop!_OS
 
 Download the latest `.deb` from the
-[releases page](https://codeberg.org/VintageTechie/powercurve/releases):
+[releases page](https://gitlab.com/vintagetechie/powercurve/-/releases):
 
 ```
 sudo apt install ./powercurve_*.deb

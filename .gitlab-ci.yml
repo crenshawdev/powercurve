@@ -1,0 +1,151 @@
+stages:
+  - check
+  - build
+  - test
+  - package
+  - deploy
+
+variables:
+  CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
+
+cache:
+  key: "${CI_COMMIT_REF_SLUG}"
+  paths:
+    - .cargo/registry/cache
+    - .cargo/registry/index
+    - target
+
+# -- check stage --------------------------------------------------------
+
+fmt:
+  stage: check
+  image: rust:latest
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --check
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+clippy:
+  stage: check
+  image: rust:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
+    - rustup component add clippy
+  script:
+    - cargo clippy --workspace --exclude powercurve-gui -- -D warnings
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# -- build stage --------------------------------------------------------
+
+build:
+  stage: build
+  image: rust:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
+  script:
+    - cargo build --release --workspace --exclude powercurve-gui
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# -- test stage ---------------------------------------------------------
+
+test:
+  stage: test
+  image: rust:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
+  script:
+    - cargo test --workspace --exclude powercurve-gui
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# -- package stage (tag only) -------------------------------------------
+
+package-arch:
+  stage: package
+  image: archlinux:base-devel
+  before_script:
+    - pacman -Syu --noconfirm rust git
+    - useradd -m builder
+    - chown -R builder:builder .
+  script:
+    - su builder -c "export CARGO_TARGET_DIR=target && makepkg -sf --noconfirm"
+  artifacts:
+    paths:
+      - "*.pkg.tar.zst"
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+package-deb:
+  stage: package
+  image: rust:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
+    - cargo install cargo-deb
+  script:
+    - cargo build --release
+    - cargo deb --no-build
+    - mkdir -p release && cp target/debian/*.deb release/
+  artifacts:
+    paths:
+      - release/*.deb
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# -- deploy stage (tag only) --------------------------------------------
+
+release:
+  stage: deploy
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: package-arch
+      artifacts: true
+    - job: package-deb
+      artifacts: true
+  script:
+    - echo "Creating release for ${CI_COMMIT_TAG}"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "Release ${CI_COMMIT_TAG}"
+    assets:
+      links:
+        - name: "Arch package"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/download"
+        - name: "Debian package"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/download"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+deploy-arch-repo:
+  stage: deploy
+  image: archlinux:base-devel
+  needs:
+    - job: package-arch
+      artifacts: true
+  before_script:
+    - pacman -Syu --noconfirm git
+  script:
+    - pkg="$(ls powercurve-git-*.pkg.tar.zst | head -1)"
+    - git clone "https://vintagetechie-dev:${DEPLOY_TOKEN}@gitlab.com/vintagetechie/vintagetechie-arch-repo.git" /tmp/repo
+    - cd /tmp/repo/x86_64
+    - rm -f .gitkeep
+    - rm -f powercurve-git-*.pkg.tar.zst
+    - cp "${CI_PROJECT_DIR}/${pkg}" .
+    - repo-add vintagetechie-arch-repo.db.tar.gz "$(basename "${pkg}")"
+    - cd /tmp/repo
+    - git config user.name "CI"
+    - git config user.email "ci@vintagetechie.gitlab.io"
+    - git add -A
+    - git commit -m "update powercurve-git to ${CI_COMMIT_TAG}"
+    - git push origin main
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/

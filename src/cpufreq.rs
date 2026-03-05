@@ -73,9 +73,9 @@ pub fn set(profile: Profile, max_percent: u8) {
 
 pub struct Cpu {
     /// Stores the path of the file being accessed.
-    path:        String,
+    path: String,
     /// Know where to truncate the path.
-    path_len:    usize,
+    path_len: usize,
     /// Scratch space for read files
     read_buffer: Vec<u8>,
 }
@@ -106,7 +106,9 @@ impl Cpu {
     }
 
     #[must_use]
-    pub fn scaling_driver(&mut self) -> Option<&str> { self.get_value("scaling_driver") }
+    pub fn scaling_driver(&mut self) -> Option<&str> {
+        self.get_value("scaling_driver")
+    }
 
     pub fn set_epp(&mut self, preference: &str) {
         self.set_value("energy_performance_preference", preference);
@@ -120,7 +122,9 @@ impl Cpu {
         self.set_value("scaling_min_freq", frequency);
     }
 
-    pub fn set_governor(&mut self, governor: &str) { self.set_value("scaling_governor", governor); }
+    pub fn set_governor(&mut self, governor: &str) {
+        self.set_value("scaling_governor", governor);
+    }
 
     fn set_value<V: std::fmt::Display>(&mut self, file: &str, value: V) {
         self.path.truncate(self.path_len);

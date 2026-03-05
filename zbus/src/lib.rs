@@ -68,9 +68,5 @@ trait PowerCurve {
 
     /// StallEvent signal, emitted when a fan channel stalls.
     #[dbus_proxy(signal)]
-    fn stall_event(
-        &self,
-        channel: &str,
-        duty: u8,
-    ) -> zbus::Result<()>;
+    fn stall_event(&self, channel: &str, duty: u8) -> zbus::Result<()>;
 }

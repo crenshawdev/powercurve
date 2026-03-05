@@ -34,15 +34,9 @@ pub fn view(app: &AppModel) -> Element<'_, Message> {
             |_| Message::SetProfile("Performance".into()),
         );
 
-        let radios = widget::column()
-            .push(quiet)
-            .push(balanced)
-            .push(performance)
-            .spacing(space_s);
+        let radios = widget::column().push(quiet).push(balanced).push(performance).spacing(space_s);
 
-        cosmic::widget::settings::section()
-            .title(fl!("power-profile"))
-            .add(radios)
+        cosmic::widget::settings::section().title(fl!("power-profile")).add(radios)
     };
 
     // Temperature readouts.
@@ -66,21 +60,14 @@ pub fn view(app: &AppModel) -> Element<'_, Message> {
             col = col.push(widget::text::body(fl!("no-temps")));
         }
 
-        cosmic::widget::settings::section()
-            .title(fl!("temperatures"))
-            .add(col)
+        cosmic::widget::settings::section().title(fl!("temperatures")).add(col)
     };
 
     // Status indicators. Track whether we have anything to show.
-    let has_status = !app.connected
-        || !app.config_loaded
-        || app.critical
-        || app.error_message.is_some();
+    let has_status =
+        !app.connected || !app.config_loaded || app.critical || app.error_message.is_some();
 
-    let mut layout = widget::column()
-        .push(profile_section)
-        .push(temp_section)
-        .spacing(space_m);
+    let mut layout = widget::column().push(profile_section).push(temp_section).spacing(space_m);
 
     if has_status {
         let mut col = widget::column().spacing(space_s);
@@ -98,9 +85,7 @@ pub fn view(app: &AppModel) -> Element<'_, Message> {
             col = col.push(widget::text::body(err.clone()));
         }
 
-        let status_section = cosmic::widget::settings::section()
-            .title(fl!("status"))
-            .add(col);
+        let status_section = cosmic::widget::settings::section().title(fl!("status")).add(col);
 
         layout = layout.push(status_section);
     }

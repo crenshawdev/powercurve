@@ -26,7 +26,7 @@ pub enum Args {
             global = true,
             group = "verbosity"
         )]
-        quiet:   bool,
+        quiet: bool,
         #[clap(
             short = 'v',
             long = "verbose",
@@ -50,10 +50,7 @@ pub enum Args {
         )]
         profile: Option<String>,
     },
-    #[clap(
-        name = "fan-detect",
-        about = "Detect hwmon devices and generate a starter fan.toml"
-    )]
+    #[clap(name = "fan-detect", about = "Detect hwmon devices and generate a starter fan.toml")]
     FanDetect {
         #[clap(
             long = "generate",
@@ -227,7 +224,15 @@ mod tests {
     #[test]
     fn parse_fan_test_options() {
         let args = Args::parse_from([
-            "powercurve", "fan-test", "pwm3", "--step", "3", "--start", "10", "--settle", "3000",
+            "powercurve",
+            "fan-test",
+            "pwm3",
+            "--step",
+            "3",
+            "--start",
+            "10",
+            "--settle",
+            "3000",
         ]);
         match args {
             Args::FanTest { channel, step, start, settle } => {

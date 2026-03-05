@@ -21,7 +21,9 @@ pub async fn run(
     settle_ms: u64,
 ) -> anyhow::Result<()> {
     // Validate the channel exists on the daemon.
-    let duties = client.get_fan_duties().await
+    let duties = client
+        .get_fan_duties()
+        .await
         .context("failed to query fan duties (is the daemon running?)")?;
     if !duties.iter().any(|(name, _)| name == channel) {
         let known: Vec<&str> = duties.iter().map(|(n, _)| n.as_str()).collect();
@@ -30,9 +32,7 @@ pub async fn run(
 
     // Check for a tachometer on this channel.
     let rpms = client.get_fan_rpms().await.unwrap_or_default();
-    let has_tacho = rpms.iter()
-        .find(|(name, _)| name == channel)
-        .is_some_and(|(_, rpm)| *rpm >= 0);
+    let has_tacho = rpms.iter().find(|(name, _)| name == channel).is_some_and(|(_, rpm)| *rpm >= 0);
     if !has_tacho {
         anyhow::bail!(
             "{} has no tachometer (RPM reads -1). Enable stall_detect in fan.toml \
@@ -46,8 +46,7 @@ pub async fn run(
     let start = start.min(99);
     let settle = Duration::from_millis(settle_ms.max(500));
 
-    println!("testing {} ({}% to 100%, step {}%, settle {}ms)",
-        channel, start, step, settle_ms);
+    println!("testing {} ({}% to 100%, step {}%, settle {}ms)", channel, start, step, settle_ms);
     println!();
 
     // Install Ctrl-C handler that clears the override before exiting.
@@ -55,7 +54,9 @@ pub async fn run(
     let mut sigint = signal(SignalKind::interrupt())?;
 
     // Stop the fan first so we start from a known state.
-    client.set_fan_override(channel, 0).await
+    client
+        .set_fan_override(channel, 0)
+        .await
         .map_err(|e| anyhow::anyhow!("failed to set override: {}", e))?;
     tokio::time::sleep(settle).await;
 
@@ -63,9 +64,13 @@ pub async fn run(
     let mut pct = start;
 
     loop {
-        if pct > 100 { break; }
+        if pct > 100 {
+            break;
+        }
 
-        client.set_fan_override(channel, pct).await
+        client
+            .set_fan_override(channel, pct)
+            .await
             .map_err(|e| anyhow::anyhow!("failed to set override: {}", e))?;
 
         // Wait for the duty to be applied and the motor to respond,
@@ -113,12 +118,13 @@ pub async fn run(
 }
 
 /// Read RPM for a specific channel from the daemon's current readings.
-async fn read_channel_rpm(
-    client: &PowerCurveProxy<'_>,
-    channel: &str,
-) -> Option<u32> {
+async fn read_channel_rpm(client: &PowerCurveProxy<'_>, channel: &str) -> Option<u32> {
     let rpms = client.get_fan_rpms().await.ok()?;
-    rpms.into_iter()
-        .find(|(name, _)| name == channel)
-        .and_then(|(_, rpm)| if rpm >= 0 { Some(rpm as u32) } else { None })
+    rpms.into_iter().find(|(name, _)| name == channel).and_then(|(_, rpm)| {
+        if rpm >= 0 {
+            Some(rpm as u32)
+        } else {
+            None
+        }
+    })
 }

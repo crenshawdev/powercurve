@@ -6,8 +6,8 @@
 
 use clap::Parser;
 use log::LevelFilter;
-use std::process;
 use powercurve::{args::Args, client, config_check, daemon, fan_detect, logging, monitor};
+use std::process;
 
 fn main() {
     let args = Args::parse();

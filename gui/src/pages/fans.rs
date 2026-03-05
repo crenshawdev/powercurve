@@ -48,11 +48,7 @@ pub fn view(app: &AppModel) -> Element<'_, Message> {
                 "--".into()
             };
 
-            let rpm_str = if ch.rpm >= 0 {
-                format!("{} RPM", ch.rpm)
-            } else {
-                String::new()
-            };
+            let rpm_str = if ch.rpm >= 0 { format!("{} RPM", ch.rpm) } else { String::new() };
 
             let mut detail = duty_str;
             if !rpm_str.is_empty() {
@@ -66,24 +62,18 @@ pub fn view(app: &AppModel) -> Element<'_, Message> {
             }
 
             col = col.push(
-                cosmic::widget::settings::item::builder(dname)
-                    .control(widget::text::body(detail)),
+                cosmic::widget::settings::item::builder(dname).control(widget::text::body(detail)),
             );
         }
 
-        cosmic::widget::settings::section()
-            .title(fl!("fan-channels"))
-            .add(col)
+        cosmic::widget::settings::section().title(fl!("fan-channels")).add(col)
     };
 
     // Fan override controls.
     let override_section = build_override_section(app, space_s);
 
     // Active fan curves.
-    let mut layout = widget::column()
-        .push(channel_section)
-        .push(override_section)
-        .spacing(space_m);
+    let mut layout = widget::column().push(channel_section).push(override_section).spacing(space_m);
 
     if !app.fan_curves.is_empty() {
         let mut col = widget::column().spacing(space_s);
@@ -95,14 +85,11 @@ pub fn view(app: &AppModel) -> Element<'_, Message> {
                 .collect::<Vec<_>>()
                 .join("  ");
             col = col.push(
-                cosmic::widget::settings::item::builder(name)
-                    .control(widget::text::body(pts)),
+                cosmic::widget::settings::item::builder(name).control(widget::text::body(pts)),
             );
         }
 
-        let curve_section = cosmic::widget::settings::section()
-            .title(fl!("fan-curves"))
-            .add(col);
+        let curve_section = cosmic::widget::settings::section().title(fl!("fan-curves")).add(col);
 
         layout = layout.push(curve_section);
     }
@@ -130,11 +117,7 @@ fn build_override_section<'a>(
             continue;
         }
 
-        let input_val: &str = app
-            .override_inputs
-            .get(&ch.name)
-            .map(String::as_str)
-            .unwrap_or("");
+        let input_val: &str = app.override_inputs.get(&ch.name).map(String::as_str).unwrap_or("");
 
         let parsed = input_val.parse::<u8>().ok().filter(|&d| d <= 100);
 
@@ -145,35 +128,30 @@ fn build_override_section<'a>(
         let placeholder = fl!("duty-placeholder");
 
         let dname = display_name(ch);
-        let row = widget::row()
-            .push(widget::text::body(dname).width(160))
-            .push(
-                widget::text_input(placeholder, input_val)
-                    .on_input(move |v| Message::OverrideInputChanged {
-                        channel: name_input.clone(),
-                        value: v,
-                    })
-                    .width(80),
-            )
-            .push(widget::text::body("%"))
-            .push(
-                widget::button::text(fl!("set"))
-                    .on_press_maybe(parsed.map(|d| Message::SetFanOverride {
-                        channel: name_set.clone(),
-                        duty_percent: d,
-                    })),
-            )
-            .push(
-                widget::button::text(fl!("clear"))
-                    .on_press(Message::ClearFanOverride(name_clear)),
-            )
-            .spacing(spacing)
-            .align_y(cosmic::iced::Alignment::Center);
+        let row =
+            widget::row()
+                .push(widget::text::body(dname).width(160))
+                .push(
+                    widget::text_input(placeholder, input_val)
+                        .on_input(move |v| Message::OverrideInputChanged {
+                            channel: name_input.clone(),
+                            value: v,
+                        })
+                        .width(80),
+                )
+                .push(widget::text::body("%"))
+                .push(widget::button::text(fl!("set")).on_press_maybe(parsed.map(|d| {
+                    Message::SetFanOverride { channel: name_set.clone(), duty_percent: d }
+                })))
+                .push(
+                    widget::button::text(fl!("clear"))
+                        .on_press(Message::ClearFanOverride(name_clear)),
+                )
+                .spacing(spacing)
+                .align_y(cosmic::iced::Alignment::Center);
 
         col = col.push(row);
     }
 
-    cosmic::widget::settings::section()
-        .title(fl!("fan-overrides"))
-        .add(col)
+    cosmic::widget::settings::section().title(fl!("fan-overrides")).add(col)
 }

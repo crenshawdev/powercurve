@@ -18,5 +18,7 @@ impl PciBus {
         }
     }
 
-    pub fn rescan(&self) -> io::Result<()> { write(self.path.join("rescan"), "1") }
+    pub fn rescan(&self) -> io::Result<()> {
+        write(self.path.join("rescan"), "1")
+    }
 }

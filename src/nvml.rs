@@ -35,10 +35,10 @@ pub enum NvidiaState {
 /// Caches device handles at init since GPUs don't hot-swap on desktops.
 /// Calls nvmlShutdown and dlclose on drop.
 pub struct NvmlHandle {
-    lib:      *mut c_void,
+    lib: *mut c_void,
     shutdown: ShutdownFn,
     get_temp: GetTempFn,
-    devices:  Vec<NvmlDevice>,
+    devices: Vec<NvmlDevice>,
 }
 
 /// Resolve a symbol from a dlopen'd library.
@@ -61,12 +61,7 @@ impl NvmlHandle {
     /// devices are found. Each failure is logged with the specific reason.
     pub fn open() -> Option<Self> {
         // dlopen the library
-        let lib = unsafe {
-            libc::dlopen(
-                c"libnvidia-ml.so.1".as_ptr(),
-                libc::RTLD_LAZY,
-            )
-        };
+        let lib = unsafe { libc::dlopen(c"libnvidia-ml.so.1".as_ptr(), libc::RTLD_LAZY) };
         if lib.is_null() {
             log::warn!("nvml: failed to load libnvidia-ml.so.1");
             return None;
@@ -91,15 +86,14 @@ impl NvmlHandle {
             }
         };
 
-        let get_count: GetCountFn =
-            match unsafe { resolve(lib, c"nvmlDeviceGetCount_v2") } {
-                Some(f) => f,
-                None => {
-                    log::warn!("nvml: missing symbol nvmlDeviceGetCount_v2");
-                    unsafe { libc::dlclose(lib) };
-                    return None;
-                }
-            };
+        let get_count: GetCountFn = match unsafe { resolve(lib, c"nvmlDeviceGetCount_v2") } {
+            Some(f) => f,
+            None => {
+                log::warn!("nvml: missing symbol nvmlDeviceGetCount_v2");
+                unsafe { libc::dlclose(lib) };
+                return None;
+            }
+        };
 
         let get_handle: GetHandleFn =
             match unsafe { resolve(lib, c"nvmlDeviceGetHandleByIndex_v2") } {
@@ -111,15 +105,14 @@ impl NvmlHandle {
                 }
             };
 
-        let get_temp: GetTempFn =
-            match unsafe { resolve(lib, c"nvmlDeviceGetTemperature") } {
-                Some(f) => f,
-                None => {
-                    log::warn!("nvml: missing symbol nvmlDeviceGetTemperature");
-                    unsafe { libc::dlclose(lib) };
-                    return None;
-                }
-            };
+        let get_temp: GetTempFn = match unsafe { resolve(lib, c"nvmlDeviceGetTemperature") } {
+            Some(f) => f,
+            None => {
+                log::warn!("nvml: missing symbol nvmlDeviceGetTemperature");
+                unsafe { libc::dlclose(lib) };
+                return None;
+            }
+        };
 
         // Initialize NVML
         let ret = unsafe { init() };
