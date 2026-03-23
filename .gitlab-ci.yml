@@ -34,7 +34,7 @@ clippy:
     - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
     - rustup component add clippy
   script:
-    - cargo clippy --workspace --exclude powercurve-gui -- -D warnings
+    - cargo clippy --workspace -- -D warnings
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -47,7 +47,7 @@ build:
   before_script:
     - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
   script:
-    - cargo build --release --workspace --exclude powercurve-gui
+    - cargo build --release --workspace
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -61,7 +61,7 @@ test:
   before_script:
     - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
   script:
-    - cargo test --workspace --exclude powercurve-gui
+    - cargo test --workspace
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

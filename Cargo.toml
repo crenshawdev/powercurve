@@ -109,7 +109,6 @@ single_match = "allow"
 
 [workspace]
 members = [
-    "gui",
     "zbus",
 ]
 
