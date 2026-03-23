@@ -4,6 +4,9 @@ rust-version = "1.93.0"
 name = "powercurve"
 version = "0.1.0-rc.1"
 authors = ["John Crenshaw"]
+license = "GPL-3.0-only"
+description = "Lightweight desktop power management daemon with configurable fan curves"
+repository = "https://gitlab.com/vintagetechie/powercurve"
 
 [package.metadata.deb]
 license-file = "LICENSE"

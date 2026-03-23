@@ -43,8 +43,8 @@ static RELOAD: AtomicBool = AtomicBool::new(false);
 
 /// Wait for SIGINT or SIGTERM, then signal the main loop to exit.
 async fn signal_handling() {
-    let mut int = signal(SignalKind::interrupt()).unwrap();
-    let mut term = signal(SignalKind::terminate()).unwrap();
+    let mut int = signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
+    let mut term = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
 
     let sig = tokio::select! {
         _ = int.recv() => "SIGINT",
@@ -60,7 +60,7 @@ async fn signal_handling() {
 /// Runs until cancelled by the caller (via tokio::select). The loop
 /// itself never checks CONTINUE since cancellation handles shutdown.
 async fn sighup_handling() {
-    let mut hup = signal(SignalKind::hangup()).unwrap();
+    let mut hup = signal(SignalKind::hangup()).expect("failed to register SIGHUP handler");
     loop {
         hup.recv().await;
         log::info!("caught SIGHUP, scheduling config reload");
@@ -826,6 +826,6 @@ where
         "failed to acquire {} after {} attempts, check if another instance is running: {}",
         bus_name,
         MAX_DBUS_RETRIES,
-        last_err.unwrap(),
+        last_err.expect("retry loop ran at least once"),
     ))
 }

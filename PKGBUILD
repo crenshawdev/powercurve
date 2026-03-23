@@ -4,7 +4,7 @@ pkgrel=1
 pkgdesc="Lightweight desktop power management daemon with configurable fan curves"
 arch=('x86_64' 'aarch64')
 url="https://gitlab.com/vintagetechie/powercurve"
-license=('GPL-3.0-or-later')
+license=('GPL-3.0-only')
 depends=(
   'dbus'
 )
