@@ -20,6 +20,15 @@ PWM via hwmon, so fan control won't work. The power profile side
 functions fine on any hardware, but if fan curves are what you're
 after, stick with `power-profiles-daemon` on laptops.
 
+**Use at your own risk.** This daemon writes directly to hardware PWM
+registers. A bad fan config can result in inadequate cooling and
+hardware damage. The built-in thermal protection sets fans to maximum
+when critical temperatures are reached, but it is a safety net, not a
+substitute for a correct configuration. Test your curves, verify your
+temps, and don't deploy a config you haven't validated. The authors
+accept no liability for hardware damage resulting from use of this
+software. See the LICENSE for full terms.
+
 ## Installation
 
 ### Arch

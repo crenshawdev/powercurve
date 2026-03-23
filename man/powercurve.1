@@ -1,4 +1,4 @@
-.TH POWERCURVE 1 "February 2026" "powercurve 0.1.0-rc.1" "User Commands"
+.TH POWERCURVE 1 "February 2026" "powercurve 0.1.0" "User Commands"
 .SH NAME
 powercurve \- desktop power management daemon with custom fan curves
 .SH SYNOPSIS
@@ -196,6 +196,17 @@ Generate a starter config:
 .RS
 .B powercurve fan-detect --generate > fan.toml
 .RE
+.SH CAVEATS
+This daemon writes directly to hardware PWM registers. A misconfigured fan
+curve can result in inadequate cooling and hardware damage. While the daemon
+provides thermal protection (critical temperature thresholds that force all
+fans to maximum), this is a safety net and not a substitute for correct
+configuration.
+.PP
+Always validate configs with
+.B powercurve config
+before deploying. Monitor temperatures after any config change. The authors
+accept no liability for damage resulting from use of this software.
 .SH AUTHOR
 John Crenshaw
 .SH LICENSE
