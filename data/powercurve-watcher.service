@@ -1,0 +1,11 @@
+[Unit]
+Description=PowerCurve Process Watcher
+After=com.vintagetechie.PowerCurve.service
+
+[Service]
+ExecStart=/usr/bin/powercurve watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

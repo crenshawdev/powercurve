@@ -1,0 +1,43 @@
+# PowerCurve process watcher configuration
+#
+# Place this file at ~/.config/powercurve/watcher.toml
+#
+# The watcher polls /proc for running processes and switches the power
+# profile when a rule matches. First matching rule wins. When no rules
+# match, the default_profile is restored (if set).
+
+[watcher]
+# How often to scan the process list, in seconds. Minimum 1.
+poll_interval = 5
+
+# Profile to restore when no rules match. Optional. If omitted, the
+# watcher only escalates and never steps back down on its own.
+default_profile = "balanced"
+
+# Match by process name (glob). Checked against /proc/<pid>/comm.
+# The comm field is capped at 15 characters by the kernel, so keep
+# patterns short or use match_cmd for longer names.
+[[rule]]
+name = "gaming"
+match_exe = "steam_app_*"
+profile = "performance"
+
+# Another exe match for a specific game binary.
+[[rule]]
+name = "lutris-game"
+match_exe = "gamemoderun"
+profile = "performance"
+
+# Match by full command line (regex). Checked against /proc/<pid>/cmdline.
+# Use this when the binary name is generic (wine, python, ffmpeg) and you
+# need to match on arguments.
+[[rule]]
+name = "video-encoding"
+match_cmd = "ffmpeg.*(-c:v|libx26[45]|libsvtav1)"
+profile = "performance"
+
+# Blender rendering.
+[[rule]]
+name = "blender-render"
+match_cmd = "blender.*--render"
+profile = "performance"
