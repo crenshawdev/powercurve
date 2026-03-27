@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 (2026-03-27)
+
+Process watcher. `powercurve watch` polls /proc and switches profiles based
+on rules in ~/.config/powercurve/watcher.toml. Runs as a user service or
+from the terminal. No config, no behavior.
+
 ## 0.1.0-rc.1 (2026-02-27)
 
 Channels can now be set to passthrough mode, leaving them under BIOS or firmware

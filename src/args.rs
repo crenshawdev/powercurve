@@ -77,6 +77,13 @@ pub enum Args {
                       signals from the daemon and sends desktop notifications. Does not require root"
     )]
     Monitor,
+    #[clap(
+        about = "Watch running processes and auto-switch power profiles",
+        long_about = "Polls /proc for running processes and matches against rules defined in \
+                      ~/.config/powercurve/watcher.toml. When a rule matches, the corresponding \
+                      power profile is set via D-Bus. Does not require root"
+    )]
+    Watch,
     #[clap(about = "Print the version and exit")]
     Version,
     #[clap(
@@ -175,6 +182,12 @@ mod tests {
     fn parse_fan_detect_generate() {
         let args = Args::parse_from(["powercurve", "fan-detect", "--generate"]);
         assert!(matches!(args, Args::FanDetect { generate: true }));
+    }
+
+    #[test]
+    fn parse_watch() {
+        let args = Args::parse_from(["powercurve", "watch"]);
+        assert!(matches!(args, Args::Watch));
     }
 
     #[test]
