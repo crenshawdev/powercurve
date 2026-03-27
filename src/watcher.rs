@@ -41,10 +41,7 @@ struct WatcherSettings {
 
 impl Default for WatcherSettings {
     fn default() -> Self {
-        Self {
-            poll_interval: default_poll_interval(),
-            default_profile: None,
-        }
+        Self { poll_interval: default_poll_interval(), default_profile: None }
     }
 }
 
@@ -82,7 +79,10 @@ fn compile_rules(config: WatcherConfig) -> anyhow::Result<(WatcherSettings, Vec<
     if let Some(ref dp) = config.watcher.default_profile {
         let lower = dp.to_lowercase();
         if !valid_profiles.contains(&lower.as_str()) {
-            anyhow::bail!("invalid default_profile '{}', expected one of: quiet, balanced, performance", dp);
+            anyhow::bail!(
+                "invalid default_profile '{}', expected one of: quiet, balanced, performance",
+                dp
+            );
         }
     }
 
@@ -91,7 +91,11 @@ fn compile_rules(config: WatcherConfig) -> anyhow::Result<(WatcherSettings, Vec<
     for def in config.rule {
         let lower = def.profile.to_lowercase();
         if !valid_profiles.contains(&lower.as_str()) {
-            anyhow::bail!("rule '{}': invalid profile '{}', expected one of: quiet, balanced, performance", def.name, def.profile);
+            anyhow::bail!(
+                "rule '{}': invalid profile '{}', expected one of: quiet, balanced, performance",
+                def.name,
+                def.profile
+            );
         }
 
         let matcher = match (def.match_exe, def.match_cmd) {
@@ -113,11 +117,7 @@ fn compile_rules(config: WatcherConfig) -> anyhow::Result<(WatcherSettings, Vec<
             }
         };
 
-        rules.push(CompiledRule {
-            name: def.name,
-            matcher,
-            profile: lower,
-        });
+        rules.push(CompiledRule { name: def.name, matcher, profile: lower });
     }
 
     Ok((config.watcher, rules))
@@ -158,10 +158,7 @@ fn scan_processes() -> Vec<ProcessInfo> {
             let cmdline = fs::read(base.join("cmdline"))
                 .ok()
                 .map(|bytes| {
-                    bytes
-                        .iter()
-                        .map(|&b| if b == 0 { b' ' } else { b })
-                        .collect::<Vec<u8>>()
+                    bytes.iter().map(|&b| if b == 0 { b' ' } else { b }).collect::<Vec<u8>>()
                 })
                 .and_then(|v| String::from_utf8(v).ok())
                 .unwrap_or_default();
@@ -244,8 +241,8 @@ pub async fn run() -> anyhow::Result<()> {
     let path = config_path();
     let (settings, rules) = match path {
         Some(ref p) if p.exists() => {
-            let text = fs::read_to_string(p)
-                .with_context(|| format!("failed to read {}", p.display()))?;
+            let text =
+                fs::read_to_string(p).with_context(|| format!("failed to read {}", p.display()))?;
             let config: WatcherConfig = toml::from_str(&text)
                 .with_context(|| format!("failed to parse {}", p.display()))?;
             compile_rules(config)?
@@ -258,13 +255,9 @@ pub async fn run() -> anyhow::Result<()> {
 
     let interval = Duration::from_secs(settings.poll_interval.max(1));
 
-    let connection = zbus::Connection::system()
-        .await
-        .context("failed to connect to system bus")?;
+    let connection = zbus::Connection::system().await.context("failed to connect to system bus")?;
 
-    let client = PowerCurveProxy::new(&connection)
-        .await
-        .context("failed to create D-Bus proxy")?;
+    let client = PowerCurveProxy::new(&connection).await.context("failed to create D-Bus proxy")?;
 
     // Seed last_set with the current daemon profile so we don't
     // redundantly re-apply on first tick.
@@ -412,10 +405,7 @@ mod tests {
     #[test]
     fn reject_invalid_default_profile() {
         let config = WatcherConfig {
-            watcher: WatcherSettings {
-                poll_interval: 5,
-                default_profile: Some("ultra".into()),
-            },
+            watcher: WatcherSettings { poll_interval: 5, default_profile: Some("ultra".into()) },
             rule: vec![],
         };
         assert!(compile_rules(config).is_err());
@@ -442,10 +432,8 @@ mod tests {
         })
         .expect("should compile");
 
-        let procs = vec![ProcessInfo {
-            exe_name: "gameA".into(),
-            cmdline: "gameA --fullscreen".into(),
-        }];
+        let procs =
+            vec![ProcessInfo { exe_name: "gameA".into(), cmdline: "gameA --fullscreen".into() }];
 
         assert_eq!(evaluate_rules(&rules, &procs), Some("performance"));
     }
@@ -463,10 +451,7 @@ mod tests {
         })
         .expect("should compile");
 
-        let procs = vec![ProcessInfo {
-            exe_name: "firefox".into(),
-            cmdline: "firefox".into(),
-        }];
+        let procs = vec![ProcessInfo { exe_name: "firefox".into(), cmdline: "firefox".into() }];
 
         assert_eq!(evaluate_rules(&rules, &procs), None);
     }
@@ -515,10 +500,7 @@ mod tests {
 
     #[test]
     fn poll_interval_floor() {
-        let settings = WatcherSettings {
-            poll_interval: 0,
-            default_profile: None,
-        };
+        let settings = WatcherSettings { poll_interval: 0, default_profile: None };
         let clamped = settings.poll_interval.max(1);
         assert_eq!(clamped, 1);
     }
