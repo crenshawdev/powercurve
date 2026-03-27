@@ -392,6 +392,49 @@ The monitor listens for D-Bus signals from the daemon and sends
 notifications through `org.freedesktop.Notifications`. It runs as a
 separate process so it doesn't need root.
 
+## Process watcher
+
+The watcher polls `/proc` for running processes and switches profiles
+automatically when something matches a rule. Saves you from manually
+setting performance mode every time you launch a game.
+
+Configure it at `~/.config/powercurve/watcher.toml`:
+
+```toml
+[watcher]
+poll_interval = 5
+default_profile = "balanced"
+
+[[rule]]
+name = "gaming"
+match_exe = "steam_app_*"
+profile = "performance"
+
+[[rule]]
+name = "video-encoding"
+match_cmd = "ffmpeg.*libx265"
+profile = "performance"
+```
+
+Rules match by process name (`match_exe`, glob) or full command line
+(`match_cmd`, regex). First match wins. When nothing matches, the
+`default_profile` is restored if set.
+
+Run interactively to see what it's doing:
+
+```
+powercurve watch
+```
+
+Or as a user service:
+
+```
+systemctl --user enable --now powercurve-watcher
+```
+
+No config file means the watcher idles and does nothing. An example
+config ships at `/usr/share/doc/powercurve/examples/watcher.toml`.
+
 ## Config validation
 
 Validate your config without restarting the daemon:
