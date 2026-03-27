@@ -50,6 +50,7 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
         | Args::FanDetect { .. }
         | Args::Config
         | Args::Monitor
+        | Args::Watch
         | Args::Version => {
             unreachable!()
         }

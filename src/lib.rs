@@ -21,6 +21,7 @@ pub mod pci;
 pub mod radeon;
 pub mod state;
 pub mod util;
+pub mod watcher;
 
 pub static DBUS_NAME: &str = "com.vintagetechie.PowerCurve";
 pub static DBUS_PATH: &str = "/com/vintagetechie/PowerCurve";
