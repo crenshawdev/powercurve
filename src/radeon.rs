@@ -7,6 +7,17 @@ use crate::kernel_parameters::{
     RadeonPowerProfile,
 };
 
+/// AMD PCI vendor ID.
+const AMD_VENDOR_ID: &str = "0x1002";
+
+/// Check whether a DRM device belongs to AMD by reading its PCI vendor ID.
+fn is_amd_device(device_path: &str) -> bool {
+    let vendor_path = format!("{}/vendor", device_path);
+    std::fs::read_to_string(&vendor_path)
+        .map(|v| v.trim() == AMD_VENDOR_ID)
+        .unwrap_or(false)
+}
+
 pub struct RadeonDevice {
     card: u8,
     pub dpm_state: RadeonDpmState,
@@ -19,6 +30,11 @@ impl RadeonDevice {
     #[must_use]
     pub fn new(card: u8) -> Option<Self> {
         let path = format!("/sys/class/drm/card{}/device", card);
+
+        if !is_amd_device(&path) {
+            return None;
+        }
+
         let device = Self {
             card,
             dpm_state: RadeonDpmState::new(&path),
@@ -26,8 +42,6 @@ impl RadeonDevice {
             power_method: RadeonPowerMethod::new(&path),
             power_profile: RadeonPowerProfile::new(&path),
         };
-
-        // TODO: Better detection of Radeon cards.
 
         let exists = device.dpm_state.get_path().exists()
             && device.dpm_force_performance.get_path().exists()

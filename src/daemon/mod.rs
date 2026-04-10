@@ -28,7 +28,7 @@ use crate::{
     state, DBUS_NAME, DBUS_PATH,
 };
 
-use std::sync::Mutex as StdMutex;
+use std::sync::RwLock;
 
 mod profiles;
 use self::profiles::{balanced, performance, quiet};
@@ -129,7 +129,7 @@ impl PowerDaemon {
 }
 
 #[derive(Clone)]
-struct PowerService(Arc<Mutex<PowerDaemon>>, Arc<StdMutex<FanStatus>>);
+struct PowerService(Arc<Mutex<PowerDaemon>>, Arc<RwLock<FanStatus>>);
 
 impl PowerService {
     pub async fn emit_active_profile_changed(&self) {
@@ -237,7 +237,7 @@ impl PowerService {
     #[dbus_interface(out_args("cpu_temp", "gpu_temp"))]
     async fn get_temperatures(&self) -> zbus::fdo::Result<(i64, i64)> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok((status.cpu_temp.map_or(-1, |t| t as i64), status.gpu_temp.map_or(-1, |t| t as i64)))
     }
 
@@ -245,7 +245,7 @@ impl PowerService {
     #[dbus_interface(out_args("duties"))]
     async fn get_fan_duties(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status
             .channel_duties
             .iter()
@@ -257,7 +257,7 @@ impl PowerService {
     #[dbus_interface(out_args("config_loaded", "critical"))]
     async fn get_fan_config_status(&self) -> zbus::fdo::Result<(bool, bool)> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok((status.config_loaded, status.critical))
     }
 
@@ -265,7 +265,7 @@ impl PowerService {
     #[dbus_interface(out_args("curves"))]
     async fn get_fan_curves(&self) -> zbus::fdo::Result<Vec<(String, Vec<(f64, f64)>)>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status
             .channel_curves
             .iter()
@@ -279,7 +279,7 @@ impl PowerService {
     #[dbus_interface(out_args("overrides"))]
     async fn get_fan_overrides(&self) -> zbus::fdo::Result<Vec<(String, u8)>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status
             .overrides
             .iter()
@@ -292,7 +292,7 @@ impl PowerService {
     async fn set_fan_override(&self, channel: &str, duty_percent: u8) -> zbus::fdo::Result<()> {
         let duty_byte = ((duty_percent.min(100) as u16) * 255 / 100) as u8;
         let mut status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.write().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         status.overrides.insert(channel.to_string(), duty_byte);
         Ok(())
     }
@@ -300,7 +300,7 @@ impl PowerService {
     /// Clear a temporary fan override, returning the channel to curve control.
     async fn clear_fan_override(&self, channel: &str) -> zbus::fdo::Result<()> {
         let mut status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.write().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         status.overrides.remove(channel);
         Ok(())
     }
@@ -310,7 +310,7 @@ impl PowerService {
     #[dbus_interface(out_args("min_duties"))]
     async fn get_fan_min_duties(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status
             .min_duties
             .iter()
@@ -323,7 +323,7 @@ impl PowerService {
     #[dbus_interface(out_args("rpms"))]
     async fn get_fan_rpms(&self) -> zbus::fdo::Result<Vec<(String, i32)>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status
             .rpms
             .iter()
@@ -335,7 +335,7 @@ impl PowerService {
     #[dbus_interface(out_args("channels"))]
     async fn get_passthrough_channels(&self) -> zbus::fdo::Result<Vec<String>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status.passthrough.clone())
     }
 
@@ -343,7 +343,7 @@ impl PowerService {
     #[dbus_interface(out_args("stalled"))]
     async fn get_stalled_fans(&self) -> zbus::fdo::Result<Vec<String>> {
         let status =
-            self.1.lock().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
+            self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))?;
         Ok(status.stalled.clone())
     }
 
@@ -631,6 +631,7 @@ pub async fn daemon() -> anyhow::Result<()> {
 
         while CONTINUE.load(Ordering::SeqCst) {
             sleep(Duration::from_millis(1000)).await;
+            let _ = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]);
 
             if RELOAD.swap(false, Ordering::SeqCst) {
                 fan_daemon.reload();
@@ -676,7 +677,7 @@ pub async fn daemon() -> anyhow::Result<()> {
 
                         let temp = fan_daemon
                             .status_handle()
-                            .lock()
+                            .read()
                             .map(|s| s.cpu_temp.unwrap_or(0).max(s.gpu_temp.unwrap_or(0)))
                             .unwrap_or(0);
 
@@ -730,7 +731,7 @@ pub async fn daemon() -> anyhow::Result<()> {
             // Emit stall signals for newly stalled channels.
             let (current_stalled, current_duties) = fan_daemon
                 .status_handle()
-                .lock()
+                .read()
                 .map(|s| (s.stalled.clone(), s.channel_duties.clone()))
                 .unwrap_or_default();
 
@@ -751,6 +752,8 @@ pub async fn daemon() -> anyhow::Result<()> {
     };
 
     log::info!("handling dbus requests");
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
+
     tokio::select! {
         _ = signal_handling_fut => {},
         _ = sighup_fut => {},
