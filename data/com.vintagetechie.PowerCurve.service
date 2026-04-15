@@ -6,8 +6,9 @@ ExecStart=/usr/bin/powercurve daemon
 ExecReload=kill -HUP $MAINPID
 ExecStopPost=/bin/sh -c 'for f in /sys/class/hwmon/hwmon*/pwm*_enable; do [ -f "$f" ] && echo 2 > "$f"; done; true'
 Restart=on-failure
-Type=dbus
+Type=notify
 BusName=com.vintagetechie.PowerCurve
+WatchdogSec=10
 
 [Install]
 WantedBy=multi-user.target

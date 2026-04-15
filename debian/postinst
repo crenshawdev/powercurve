@@ -9,7 +9,9 @@ case "$1" in
     config="/etc/powercurve/fan.toml"
     if [ ! -f "$config" ]; then
       mkdir -p /etc/powercurve
-      powercurve fan-detect --generate > "$config" 2>/dev/null || true
+      if powercurve fan-detect --generate > "$config" 2>/dev/null; then
+        powercurve config 2>&1 | logger -t powercurve-postinst || true
+      fi
     fi
 
     systemctl enable com.vintagetechie.PowerCurve.service || true
