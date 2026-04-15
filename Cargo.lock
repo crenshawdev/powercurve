@@ -1042,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "powercurve"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1058,6 +1058,7 @@ dependencies = [
  "once_cell",
  "powercurve-zbus",
  "regex",
+ "sd-notify",
  "serde",
  "sysfs-class",
  "thiserror",
@@ -1235,6 +1236,15 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.12.1",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sd-notify"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e4ef7359e694bfaf1dd27a30f9d760b54c00dfae9f19bd0c05a39bc9128fe76"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

@@ -10,7 +10,7 @@ use std::{
     cmp,
     collections::HashMap,
     fs, io,
-    sync::{Arc, Mutex as StdMutex},
+    sync::{Arc, RwLock},
 };
 use sysfs_class::{HwMon, SysClass};
 
@@ -148,7 +148,7 @@ pub struct FanDaemon {
     platforms: Vec<HwMon>,
     cpus: Vec<HwMon>,
     nvidia: NvidiaState,
-    status: Arc<StdMutex<FanStatus>>,
+    status: Arc<RwLock<FanStatus>>,
     thermal_fallback: bool,
     thermal_cooldown: u32,
     current_profile: String,
@@ -163,7 +163,7 @@ impl FanDaemon {
     /// Without one, fan control is disabled and the daemon only handles
     /// power profiles.
     pub fn new(nvidia: NvidiaState) -> Self {
-        let status = Arc::new(StdMutex::new(FanStatus::default()));
+        let status = Arc::new(RwLock::new(FanStatus::default()));
         let mut daemon = Self {
             channels: Vec::new(),
             channel_defs: Vec::new(),
@@ -191,7 +191,7 @@ impl FanDaemon {
     }
 
     /// Shared status handle for D-Bus handlers to read.
-    pub fn status_handle(&self) -> Arc<StdMutex<FanStatus>> {
+    pub fn status_handle(&self) -> Arc<RwLock<FanStatus>> {
         self.status.clone()
     }
 
@@ -260,7 +260,7 @@ impl FanDaemon {
             self.thermal_fallback = config.thermal_fallback.unwrap_or(false);
             self.thermal_cooldown = config.thermal_cooldown.unwrap_or(30);
 
-            if let Ok(mut s) = self.status.lock() {
+            if let Ok(mut s) = self.status.write() {
                 s.config_loaded = true;
             }
         } else {
@@ -288,6 +288,16 @@ impl FanDaemon {
             if let Err(err) = self.discover() {
                 log::error!("fan daemon: {}", err);
             }
+        }
+
+        let active = self.channels.iter().filter(|ch| !ch.passthrough).count();
+        if active == 0 && self.channels.is_empty() {
+            log::info!("no controllable fan channels found, running in profile-only mode");
+        } else if active == 0 {
+            log::info!(
+                "all {} fan channel(s) in passthrough mode, running in profile-only mode",
+                self.channels.len()
+            );
         }
     }
 
@@ -367,7 +377,7 @@ impl FanDaemon {
         self.stall_counts.fill(0);
 
         // Clear any temporary fan overrides when the profile changes.
-        if let Ok(mut s) = self.status.lock() {
+        if let Ok(mut s) = self.status.write() {
             s.overrides.clear();
         }
 
@@ -552,7 +562,7 @@ impl FanDaemon {
                     // Temporary override bypasses curve evaluation entirely.
                     let override_duty = self
                         .status
-                        .lock()
+                        .read()
                         .ok()
                         .and_then(|s| s.overrides.get(&channel.pwm).copied());
                     if let Some(duty) = override_duty {
@@ -635,7 +645,7 @@ impl FanDaemon {
                 }
             }
 
-            if let Ok(mut s) = self.status.lock() {
+            if let Ok(mut s) = self.status.write() {
                 s.cpu_temp = cpu_temp;
                 s.gpu_temp = gpu_temp;
                 s.channel_duties = duties;
