@@ -8,14 +8,43 @@ use crate::kernel_parameters::{
 };
 
 /// AMD PCI vendor ID.
-const AMD_VENDOR_ID: &str = "0x1002";
+const AMD_VENDOR_ID: u16 = 0x1002;
 
 /// Check whether a DRM device belongs to AMD by reading its PCI vendor ID.
 fn is_amd_device(device_path: &str) -> bool {
     let vendor_path = format!("{}/vendor", device_path);
     std::fs::read_to_string(&vendor_path)
-        .map(|v| v.trim() == AMD_VENDOR_ID)
+        .ok()
+        .and_then(|v| {
+            let trimmed = v.trim();
+            let hex = trimmed.trim_start_matches("0x").trim_start_matches("0X");
+            u16::from_str_radix(hex, 16).ok()
+        })
+        .map(|id| id == AMD_VENDOR_ID)
         .unwrap_or(false)
+}
+
+/// Scan `/sys/class/drm` for `cardN` entries, yielding each card index.
+fn drm_card_indices() -> Vec<u8> {
+    let entries = match std::fs::read_dir("/sys/class/drm") {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cards: Vec<u8> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name();
+            let name_str = name.to_str()?;
+            let stripped = name_str.strip_prefix("card")?;
+            if stripped.contains('-') {
+                return None;
+            }
+            stripped.parse::<u8>().ok()
+        })
+        .collect();
+    cards.sort_unstable();
+    cards
 }
 
 pub struct RadeonDevice {
@@ -74,6 +103,6 @@ impl DeviceList<Self> for RadeonDevice {
     const SUPPORTED: &'static [&'static str] = &[""];
 
     fn get_devices() -> Box<dyn Iterator<Item = Self>> {
-        Box::new((0u8..10).filter_map(Self::new))
+        Box::new(drm_card_indices().into_iter().filter_map(Self::new))
     }
 }

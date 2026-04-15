@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 (2026-04-15)
+
+Switched the systemd unit to Type=notify with a watchdog. systemd actually
+knows when the daemon is alive instead of just assuming it. The fan loop pings
+the watchdog after each step. A hung step trips it instead of sailing past.
+
+Radeon detection now reads the PCI vendor ID before probing DPM paths. Machines
+with Intel or Nvidia graphics no longer generate spurious card probes. Also
+walks /sys/class/drm for real card entries instead of guessing 0 through 9.
+
+Postinst pipes the config check output to the journal after generating a
+default fan config. Install-time problems are visible without hunting.
+
 ## 0.2.0 (2026-03-27)
 
 Process watcher. `powercurve watch` polls /proc and switches profiles based
