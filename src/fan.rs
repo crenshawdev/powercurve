@@ -292,9 +292,7 @@ impl FanDaemon {
 
         let active = self.channels.iter().filter(|ch| !ch.passthrough).count();
         if active == 0 && self.channels.is_empty() {
-            log::info!(
-                "no controllable fan channels found, running in profile-only mode"
-            );
+            log::info!("no controllable fan channels found, running in profile-only mode");
         } else if active == 0 {
             log::info!(
                 "all {} fan channel(s) in passthrough mode, running in profile-only mode",
