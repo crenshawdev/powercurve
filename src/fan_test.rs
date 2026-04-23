@@ -3,7 +3,7 @@
 use anyhow::Context;
 use powercurve_zbus::PowerCurveProxy;
 use std::time::Duration;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 
 /// Ramp duty on a single fan channel from `start` to 100% in `step`
 /// increments, reading RPM at each level. Reports the lowest duty
@@ -120,11 +120,7 @@ pub async fn run(
 /// Read RPM for a specific channel from the daemon's current readings.
 async fn read_channel_rpm(client: &PowerCurveProxy<'_>, channel: &str) -> Option<u32> {
     let rpms = client.get_fan_rpms().await.ok()?;
-    rpms.into_iter().find(|(name, _)| name == channel).and_then(|(_, rpm)| {
-        if rpm >= 0 {
-            Some(rpm as u32)
-        } else {
-            None
-        }
-    })
+    rpms.into_iter()
+        .find(|(name, _)| name == channel)
+        .and_then(|(_, rpm)| if rpm >= 0 { Some(rpm as u32) } else { None })
 }

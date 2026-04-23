@@ -77,11 +77,7 @@ impl RadeonDevice {
             && device.power_method.get_path().exists()
             && device.power_profile.get_path().exists();
 
-        if exists {
-            Some(device)
-        } else {
-            None
-        }
+        if exists { Some(device) } else { None }
     }
 
     pub fn set_profiles(&self, power_profile: &str, dpm_state: &str, dpm_perf: &str) {

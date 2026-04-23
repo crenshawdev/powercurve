@@ -1,5 +1,5 @@
 [package]
-edition = "2021"
+edition = "2024"
 rust-version = "1.93.0"
 name = "powercurve"
 version = "0.2.1"

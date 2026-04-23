@@ -47,11 +47,11 @@ impl Graphics {
             let mut functions = Vec::new();
             if let Some(parent_slot) = parent.id().split('.').next() {
                 for func in &devs {
-                    if let Some(func_slot) = func.id().split('.').next() {
-                        if func_slot == parent_slot {
-                            log::info!("{}: Function for {}", func.id(), parent.id());
-                            functions.push(func.clone());
-                        }
+                    if let Some(func_slot) = func.id().split('.').next()
+                        && func_slot == parent_slot
+                    {
+                        log::info!("{}: Function for {}", func.id(), parent.id());
+                        functions.push(func.clone());
                     }
                 }
             }
