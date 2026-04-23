@@ -1055,7 +1055,6 @@ dependencies = [
  "intel-pstate",
  "libc",
  "log",
- "once_cell",
  "powercurve-zbus",
  "regex",
  "sd-notify",
