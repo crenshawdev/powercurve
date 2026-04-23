@@ -75,8 +75,8 @@ assets = [
 [dependencies]
 anyhow = "1"
 concat-in-place = "1"
-dirs = "5"
-fern = "0.6"
+dirs = "6"
+fern = "0.7"
 futures-lite = "2"
 glob = "0.3"
 intel-pstate = "1"
