@@ -1061,7 +1061,7 @@ dependencies = [
  "sd-notify",
  "serde",
  "sysfs-class",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "zbus",
