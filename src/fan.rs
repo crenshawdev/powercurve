@@ -422,8 +422,7 @@ impl FanDaemon {
             .iter()
             .filter_map(|sensor| sensor.temp(1).ok())
             .filter_map(|temp| temp.input().ok())
-            .fold(None, |best, input| {
-                let val = input as u32;
+            .fold(None, |best, val| {
                 if best.is_none_or(|b| val > b) {
                     log::debug!("highest cpu temp: {}", val);
                     Some(val)
@@ -440,8 +439,7 @@ impl FanDaemon {
             .iter()
             .filter_map(|sensor| sensor.temp(1).ok())
             .filter_map(|temp| temp.input().ok())
-            .fold(None, |best, input| {
-                let val = input as u32;
+            .fold(None, |best, val| {
                 if best.is_none_or(|b| val > b) {
                     log::debug!("highest amdgpu temp: {}", val);
                     Some(val)
