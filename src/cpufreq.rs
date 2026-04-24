@@ -1,7 +1,7 @@
 // Copyright 2022 System76 <info@system76.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{util::write_value, Profile};
+use crate::{Profile, util::write_value};
 use concat_in_place::strcat;
 use std::{
     fmt::Write,

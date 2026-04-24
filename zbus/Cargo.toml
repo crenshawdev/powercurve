@@ -1,8 +1,11 @@
 [package]
 name = "powercurve-zbus"
 version = "2.0.0"
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0-only"
+
+[lints]
+workspace = true
 
 [dependencies]
 zbus = "3"

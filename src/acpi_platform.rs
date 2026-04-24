@@ -8,14 +8,14 @@
 //! - Available Platform Profiles:
 //!  - <https://mjmwired.net/kernel/Documentation/ABI/testing/sysfs-platform_profile>
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::{fs, path::Path};
 
 const SYSFS_PATH: &str = "/sys/firmware/acpi/platform_profile";
 
 /// Displays available ACPI platform profiles to choose from.
 pub fn choices() -> impl Iterator<Item = &'static str> {
-    static CHOICES: Lazy<Option<Box<[Box<str>]>>> = Lazy::new(|| {
+    static CHOICES: LazyLock<Option<Box<[Box<str>]>>> = LazyLock::new(|| {
         let path = concat_in_place::strcat!(SYSFS_PATH "_choices");
         let choices = std::fs::read_to_string(path).ok()?;
         Some(Box::from(choices.split_ascii_whitespace().map(Box::from).collect::<Vec<_>>()))

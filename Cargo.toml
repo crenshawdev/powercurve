@@ -1,5 +1,5 @@
 [package]
-edition = "2021"
+edition = "2024"
 rust-version = "1.93.0"
 name = "powercurve"
 version = "0.2.1"
@@ -75,17 +75,17 @@ assets = [
 [dependencies]
 anyhow = "1"
 concat-in-place = "1"
-dirs = "5"
-fern = "0.6"
+dirs = "6"
+fern = "0.7"
 futures-lite = "2"
 glob = "0.3"
 intel-pstate = "1"
 libc = "0.2"
 log = "0.4"
-once_cell = "1"
 regex = "1"
 sd-notify = "0.5.0"
-thiserror = "1"
+sysfs-class = "0.1.3"
+thiserror = "2"
 toml = "0.8"
 zvariant = "3"
 
@@ -98,9 +98,6 @@ path = "zbus"
 
 [dependencies.serde]
 workspace = true
-
-[dependencies.sysfs-class]
-git = "https://github.com/pop-os/sysfs-class"
 
 [dependencies.tokio]
 version = "1"
@@ -119,10 +116,8 @@ default-features = false
 [dev-dependencies]
 env_logger = "0.11"
 
-[lints.clippy]
-match_like_matches_macro = "allow"
-missing_safety_doc = "allow"
-single_match = "allow"
+[lints]
+workspace = true
 
 [workspace]
 members = [
@@ -132,3 +127,5 @@ members = [
 [workspace.dependencies.serde]
 version = "1.0"
 features = ["derive"]
+
+[workspace.lints.clippy]

@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    signal::unix::{signal, SignalKind},
+    signal::unix::{SignalKind, signal},
     time::sleep,
 };
 
@@ -248,7 +248,9 @@ pub async fn run() -> anyhow::Result<()> {
             compile_rules(config)?
         }
         _ => {
-            log::info!("no watcher config found, idling (create ~/.config/powercurve/watcher.toml to add rules)");
+            log::info!(
+                "no watcher config found, idling (create ~/.config/powercurve/watcher.toml to add rules)"
+            );
             (WatcherSettings::default(), Vec::new())
         }
     };

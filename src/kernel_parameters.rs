@@ -60,7 +60,7 @@ pub trait DeviceList<T> {
 // Macros to help with constructing kernel parameter structures.
 
 macro_rules! static_parameters {
-    ($($struct:tt { $name:tt : $path:expr }),+) => (
+    ($($struct:tt { $name:tt : $path:expr_2021 }),+) => (
         $(
             pub struct $struct;
 
@@ -78,7 +78,7 @@ macro_rules! static_parameters {
 }
 
 macro_rules! dynamic_parameters {
-    ($($struct:tt { $name:tt : $format:expr }),+) => (
+    ($($struct:tt { $name:tt : $format:expr_2021 }),+) => (
         $(
             pub struct $struct {
                 path: PathBuf

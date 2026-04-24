@@ -13,11 +13,11 @@ const VALID_PROFILES: &[&str] = &["Quiet", "Balanced", "Performance"];
 /// Write the active profile name to disk so it survives restarts.
 pub fn save_profile(name: &str) {
     let dir = Path::new(STATE_DIR);
-    if !dir.exists() {
-        if let Err(why) = fs::create_dir_all(dir) {
-            log::warn!("failed to create state directory {}: {}", STATE_DIR, why);
-            return;
-        }
+    if !dir.exists()
+        && let Err(why) = fs::create_dir_all(dir)
+    {
+        log::warn!("failed to create state directory {}: {}", STATE_DIR, why);
+        return;
     }
 
     if let Err(why) = fs::write(STATE_FILE, name) {
