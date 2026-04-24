@@ -284,10 +284,10 @@ impl FanDaemon {
         self.last_temps = vec![None; count];
         self.stall_counts = vec![0; count];
 
-        if !self.platform_names.is_empty() {
-            if let Err(err) = self.discover() {
-                log::error!("fan daemon: {}", err);
-            }
+        if !self.platform_names.is_empty()
+            && let Err(err) = self.discover()
+        {
+            log::error!("fan daemon: {}", err);
         }
 
         let active = self.channels.iter().filter(|ch| !ch.passthrough).count();
@@ -422,8 +422,7 @@ impl FanDaemon {
             .iter()
             .filter_map(|sensor| sensor.temp(1).ok())
             .filter_map(|temp| temp.input().ok())
-            .fold(None, |best, input| {
-                let val = input as u32;
+            .fold(None, |best, val| {
                 if best.is_none_or(|b| val > b) {
                     log::debug!("highest cpu temp: {}", val);
                     Some(val)
@@ -440,8 +439,7 @@ impl FanDaemon {
             .iter()
             .filter_map(|sensor| sensor.temp(1).ok())
             .filter_map(|temp| temp.input().ok())
-            .fold(None, |best, input| {
-                let val = input as u32;
+            .fold(None, |best, val| {
                 if best.is_none_or(|b| val > b) {
                     log::debug!("highest amdgpu temp: {}", val);
                     Some(val)
@@ -826,10 +824,10 @@ impl FanCurve {
 
     pub fn get_duty(&self, temp: i16) -> Option<u16> {
         // Below the curve means fans off
-        if let Some(first) = self.points.first() {
-            if temp < first.temp {
-                return Some(0);
-            }
+        if let Some(first) = self.points.first()
+            && temp < first.temp
+        {
+            return Some(0);
         }
 
         // Use when we upgrade to 1.28.0
@@ -844,10 +842,10 @@ impl FanCurve {
         }
 
         // If the temp is greater than the last point, return the last point duty
-        if let Some(last) = self.points.last() {
-            if temp > last.temp {
-                return Some(last.duty);
-            }
+        if let Some(last) = self.points.last()
+            && temp > last.temp
+        {
+            return Some(last.duty);
         }
 
         // If there are no points, return None

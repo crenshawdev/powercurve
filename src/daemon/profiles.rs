@@ -4,10 +4,10 @@
 
 use super::pci_runtime_pm_support;
 use crate::{
+    Profile,
     errors::{PciDeviceError, ProfileError},
     kernel_parameters::{DeviceList, Dirty},
     radeon::RadeonDevice,
-    Profile,
 };
 use intel_pstate::{PState, PStateError, PStateValues};
 use sysfs_class::{PciDevice, RuntimePM, RuntimePowerManagement, ScsiHost, SysClass};
@@ -16,7 +16,7 @@ use sysfs_class::{PciDevice, RuntimePM, RuntimePowerManagement, ScsiHost, SysCla
 /// setting a profile. Even if one parameter fails to set, we'll still be able to set other
 /// parameters successfully.
 macro_rules! catch {
-    ($errors:ident, $result:expr) => {
+    ($errors:ident, $result:expr_2021) => {
         match $result {
             Ok(_) => (),
             Err(why) => $errors.push(why.into()),

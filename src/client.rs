@@ -43,7 +43,7 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
         },
         Args::Status => status(&mut client).await.context("failed to get daemon status"),
         Args::Fan { channel, duty } => fan_override(&mut client, channel, duty).await,
-        Args::FanTest { ref channel, step, start, settle } => {
+        Args::FanTest { channel, step, start, settle } => {
             crate::fan_test::run(&mut client, channel, *start, *step, *settle).await
         }
         Args::Daemon { .. }
@@ -118,14 +118,14 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
         }
     }
 
-    if let Ok(curves) = client.get_fan_curves().await {
-        if !curves.is_empty() {
-            println!("\nCurves:");
-            for (name, points) in &curves {
-                let pts: Vec<String> =
-                    points.iter().map(|(t, d)| format!("{:.0}C/{:.0}%", t, d)).collect();
-                println!("  {}: {}", name, pts.join(" "));
-            }
+    if let Ok(curves) = client.get_fan_curves().await
+        && !curves.is_empty()
+    {
+        println!("\nCurves:");
+        for (name, points) in &curves {
+            let pts: Vec<String> =
+                points.iter().map(|(t, d)| format!("{:.0}C/{:.0}%", t, d)).collect();
+            println!("  {}: {}", name, pts.join(" "));
         }
     }
 

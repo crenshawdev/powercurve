@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 use std::os::raw::c_uint;
 
 /// NVML return code. 0 means success.
@@ -47,11 +47,13 @@ pub struct NvmlHandle {
 /// Caller must ensure `lib` is a valid handle from dlopen and that the
 /// symbol's actual signature matches the target type `T`.
 unsafe fn resolve<T>(lib: *mut c_void, name: &CStr) -> Option<T> {
-    let sym = libc::dlsym(lib, name.as_ptr());
-    if sym.is_null() {
-        return None;
+    unsafe {
+        let sym = libc::dlsym(lib, name.as_ptr());
+        if sym.is_null() {
+            return None;
+        }
+        Some(std::mem::transmute_copy(&sym))
     }
-    Some(std::mem::transmute_copy(&sym))
 }
 
 impl NvmlHandle {

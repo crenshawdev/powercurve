@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::fan::{self, FanConfig, CONFIG_PATH};
+use crate::fan::{self, CONFIG_PATH, FanConfig};
 use std::fs;
 use sysfs_class::{HwMon, SysClass};
 
@@ -125,22 +125,22 @@ fn validate_critical_temps(config: &FanConfig, issues: &mut Vec<Issue>) {
         )));
     }
 
-    if let Some(h) = config.hysteresis {
-        if !(0.0..=20.0).contains(&h) {
-            issues.push(Issue::error(format!(
-                "hysteresis {:.1}C is outside reasonable range (0-20)",
-                h,
-            )));
-        }
+    if let Some(h) = config.hysteresis
+        && !(0.0..=20.0).contains(&h)
+    {
+        issues
+            .push(Issue::error(
+                format!("hysteresis {:.1}C is outside reasonable range (0-20)", h,),
+            ));
     }
 
-    if let Some(cd) = config.thermal_cooldown {
-        if cd == 0 || cd > 300 {
-            issues.push(Issue::error(format!(
-                "thermal_cooldown {}s is outside reasonable range (1-300)",
-                cd,
-            )));
-        }
+    if let Some(cd) = config.thermal_cooldown
+        && (cd == 0 || cd > 300)
+    {
+        issues.push(Issue::error(format!(
+            "thermal_cooldown {}s is outside reasonable range (1-300)",
+            cd,
+        )));
     }
 }
 
@@ -173,22 +173,22 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             )));
         }
 
-        if let Some(min) = ch.min_duty {
-            if !(0.0..=100.0).contains(&min) {
-                issues.push(Issue::error(format!(
-                    "channel {} ({}): min_duty {:.1} is outside 0-100 range",
-                    i, ch.pwm, min,
-                )));
-            }
+        if let Some(min) = ch.min_duty
+            && !(0.0..=100.0).contains(&min)
+        {
+            issues.push(Issue::error(format!(
+                "channel {} ({}): min_duty {:.1} is outside 0-100 range",
+                i, ch.pwm, min,
+            )));
         }
 
-        if let Some(t) = ch.stall_threshold {
-            if t == 0 || t > 10 {
-                issues.push(Issue::error(format!(
-                    "channel {} ({}): stall_threshold {} is outside reasonable range (1-10)",
-                    i, ch.pwm, t,
-                )));
-            }
+        if let Some(t) = ch.stall_threshold
+            && (t == 0 || t > 10)
+        {
+            issues.push(Issue::error(format!(
+                "channel {} ({}): stall_threshold {} is outside reasonable range (1-10)",
+                i, ch.pwm, t,
+            )));
         }
 
         if let Some(ref curve) = ch.curve {
@@ -244,13 +244,13 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
 
     let names: Vec<String> = hwmons.iter().filter_map(|h| h.name().ok()).collect();
 
-    if let Some(ref platform) = config.platform {
-        if !names.iter().any(|n| n == platform) {
-            issues.push(Issue::warning(format!(
-                "platform '{}' not found in hwmon devices on this machine",
-                platform,
-            )));
-        }
+    if let Some(ref platform) = config.platform
+        && !names.iter().any(|n| n == platform)
+    {
+        issues.push(Issue::warning(format!(
+            "platform '{}' not found in hwmon devices on this machine",
+            platform,
+        )));
     }
 
     let has_cpu_hwmon = names

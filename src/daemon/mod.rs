@@ -7,25 +7,26 @@ use std::{
     collections::HashMap,
     fmt::Display,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 use tokio::{
-    signal::unix::{signal, SignalKind},
-    sync::{watch, Mutex},
+    signal::unix::{SignalKind, signal},
+    sync::{Mutex, watch},
     time::sleep,
 };
 use zbus::Interface;
 
 use crate::{
+    DBUS_NAME, DBUS_PATH,
     errors::ProfileError,
     fan::{FanDaemon, FanStatus},
     graphics::Graphics,
     kernel_parameters::{KernelParameter, NmiWatchdog},
     nvml::{NvidiaState, NvmlHandle},
-    state, DBUS_NAME, DBUS_PATH,
+    state,
 };
 
 use std::sync::RwLock;
