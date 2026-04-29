@@ -2,36 +2,15 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-pub use sysfs_class::RuntimePowerManagement;
-
 use std::{
-    fs::{read_to_string, write},
+    fs::write,
     path::{Path, PathBuf},
     str,
 };
 
 /// Base trait that implements kernel parameter get/set capabilities.
 pub trait KernelParameter {
-    const NAME: &'static str;
-
     fn get_path(&self) -> &Path;
-
-    fn get(&self) -> Option<String> {
-        let path = self.get_path();
-        if path.exists() {
-            match read_to_string(path) {
-                Ok(mut value) => {
-                    value.pop();
-                    return Some(value);
-                }
-                Err(why) => log::error!("{}: failed to get value: {}", path.display(), why),
-            }
-        } else {
-            log::warn!("{} does not exist", path.display());
-        }
-
-        None
-    }
 
     fn set(&self, value: &[u8]) {
         let path = self.get_path();
@@ -52,8 +31,6 @@ pub trait KernelParameter {
 }
 
 pub trait DeviceList<T> {
-    const SUPPORTED: &'static [&'static str];
-
     fn get_devices() -> Box<dyn Iterator<Item = T>>;
 }
 
@@ -67,8 +44,6 @@ macro_rules! static_parameters {
             impl Default for $struct { fn default() -> Self { $struct } }
 
             impl KernelParameter for $struct {
-                const NAME: &'static str = stringify!($name);
-
                 fn get_path(&self) -> &Path {
                     Path::new($path)
                 }
@@ -94,8 +69,6 @@ macro_rules! dynamic_parameters {
             }
 
             impl KernelParameter for $struct {
-                const NAME: &'static str = stringify!($name);
-
                 fn get_path(&self) -> &Path { &self.path }
             }
         )+
@@ -116,11 +89,7 @@ dynamic_parameters! {
         radeon_dpm_force_performance_level: "{}/power_dpm_force_performance_level"
     },
     RadeonPowerMethod { radeon_power_method: "{}/power_method" },
-    RadeonPowerProfile { radeon_power_profile: "{}/power_profile" },
-    PowerSave { power_save: "/sys/module/{}/parameters/power_save" },
-    PowerSaveController {
-        power_save_controller: "/sys/module/{}/parameters/power_save_controller"
-    }
+    RadeonPowerProfile { radeon_power_profile: "{}/power_profile" }
 }
 
 #[derive(Default)]

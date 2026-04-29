@@ -96,8 +96,6 @@ impl RadeonDevice {
 }
 
 impl DeviceList<Self> for RadeonDevice {
-    const SUPPORTED: &'static [&'static str] = &[""];
-
     fn get_devices() -> Box<dyn Iterator<Item = Self>> {
         Box::new(drm_card_indices().into_iter().filter_map(Self::new))
     }

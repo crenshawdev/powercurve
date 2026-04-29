@@ -43,9 +43,9 @@ static CONTINUE: AtomicBool = AtomicBool::new(true);
 static RELOAD: AtomicBool = AtomicBool::new(false);
 
 /// Wait for SIGINT or SIGTERM, then signal the main loop to exit.
-async fn signal_handling() {
-    let mut int = signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
-    let mut term = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+async fn signal_handling() -> anyhow::Result<()> {
+    let mut int = signal(SignalKind::interrupt()).context("failed to register SIGINT handler")?;
+    let mut term = signal(SignalKind::terminate()).context("failed to register SIGTERM handler")?;
 
     let sig = tokio::select! {
         _ = int.recv() => "SIGINT",
@@ -54,14 +54,15 @@ async fn signal_handling() {
 
     log::info!("caught signal: {}", sig);
     CONTINUE.store(false, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Listen for SIGHUP and flag a config reload on each occurrence.
 ///
 /// Runs until cancelled by the caller (via tokio::select). The loop
 /// itself never checks CONTINUE since cancellation handles shutdown.
-async fn sighup_handling() {
-    let mut hup = signal(SignalKind::hangup()).expect("failed to register SIGHUP handler");
+async fn sighup_handling() -> anyhow::Result<()> {
+    let mut hup = signal(SignalKind::hangup()).context("failed to register SIGHUP handler")?;
     loop {
         hup.recv().await;
         log::info!("caught SIGHUP, scheduling config reload");
@@ -757,8 +758,8 @@ pub async fn daemon() -> anyhow::Result<()> {
     let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
 
     tokio::select! {
-        _ = signal_handling_fut => {},
-        _ = sighup_fut => {},
+        r = signal_handling_fut => r?,
+        r = sighup_fut => r?,
         _ = main_loop => {},
     };
 
@@ -795,9 +796,9 @@ where
     I: zbus::Interface,
     F: Fn() -> I,
 {
-    let mut last_err = None;
-
-    for attempt in 1..=MAX_DBUS_RETRIES {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
         let result = zbus::ConnectionBuilder::system()
             .context("failed to create zbus connection builder")?
             .name(bus_name)
@@ -809,28 +810,26 @@ where
 
         match result {
             Ok(conn) => return Ok(conn),
+            Err(e) if attempt >= MAX_DBUS_RETRIES => {
+                return Err(anyhow::anyhow!(
+                    "failed to acquire {} after {} attempts, check if another instance is running: {}",
+                    bus_name,
+                    MAX_DBUS_RETRIES,
+                    e,
+                ));
+            }
             Err(e) => {
-                if attempt < MAX_DBUS_RETRIES {
-                    let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
-                    log::warn!(
-                        "{}: attempt {}/{} failed ({}), retrying in {}ms",
-                        bus_name,
-                        attempt,
-                        MAX_DBUS_RETRIES,
-                        e,
-                        delay.as_millis(),
-                    );
-                    sleep(delay).await;
-                }
-                last_err = Some(e);
+                let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                log::warn!(
+                    "{}: attempt {}/{} failed ({}), retrying in {}ms",
+                    bus_name,
+                    attempt,
+                    MAX_DBUS_RETRIES,
+                    e,
+                    delay.as_millis(),
+                );
+                sleep(delay).await;
             }
         }
     }
-
-    Err(anyhow::anyhow!(
-        "failed to acquire {} after {} attempts, check if another instance is running: {}",
-        bus_name,
-        MAX_DBUS_RETRIES,
-        last_err.expect("retry loop ran at least once"),
-    ))
 }

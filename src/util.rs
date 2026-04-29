@@ -4,19 +4,9 @@
 
 use std::{
     fmt::Display,
-    fs::{DirEntry, File},
+    fs::File,
     io::{self, Write},
-    path::Path,
 };
-
-pub fn entries<T, F: FnMut(DirEntry) -> T>(path: &Path, mut func: F) -> io::Result<Vec<T>> {
-    let mut ret = Vec::new();
-    for entry_res in path.read_dir()? {
-        ret.push(func(entry_res?));
-    }
-
-    Ok(ret)
-}
 
 /// Write a value that implements `Display` to a file
 pub fn write_value<V: Display>(path: &str, value: V) {

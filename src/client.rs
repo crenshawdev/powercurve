@@ -52,7 +52,7 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
         | Args::Monitor
         | Args::Watch
         | Args::Version => {
-            unreachable!()
+            unreachable!("variant dispatched in main before reaching client")
         }
     }
 }
