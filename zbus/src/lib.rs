@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: MPL-2.0
 
-#![allow(clippy::type_complexity)]
+//! Generated client proxy for the `com.vintagetechie.PowerCurve` D-Bus
+//! service. The `PowerCurveProxy` type is produced by the `dbus_proxy` macro
+//! from the trait below and is the only public item this crate exposes.
 
+#![allow(clippy::type_complexity)]
+// The dbus_proxy macro emits a `PowerCurveProxy` struct with a private inner
+// field and a constructor that the lint cannot see doc comments on. Allow the
+// generated scaffolding at crate scope; the per-method docs come through fine.
+#![allow(missing_docs)]
+
+/// D-Bus client proxy for the PowerCurve daemon.
 #[zbus::dbus_proxy(
     interface = "com.vintagetechie.PowerCurve",
     default_service = "com.vintagetechie.PowerCurve",

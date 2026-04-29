@@ -4,6 +4,12 @@
 
 use clap::{Parser, builder::PossibleValuesParser};
 
+/// Top-level CLI for the `powercurve` binary.
+///
+/// Each variant is one subcommand. Variant- and field-level documentation
+/// lives in the clap `about` and `help` attributes rather than `///` comments,
+/// which is why this enum carries `allow(missing_docs)` for its inner items.
+#[allow(missing_docs)]
 #[derive(Parser)]
 #[clap(
     name = "powercurve",
