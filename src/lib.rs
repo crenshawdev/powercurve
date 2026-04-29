@@ -2,32 +2,32 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-pub mod acpi_platform;
+pub(crate) mod acpi_platform;
 pub mod args;
 pub mod client;
 pub mod config_check;
-pub mod cpufreq;
+pub(crate) mod cpufreq;
 pub mod daemon;
-pub mod errors;
+pub(crate) mod errors;
 pub mod fan;
 pub mod fan_detect;
-pub mod fan_test;
+pub(crate) mod fan_test;
 pub mod graphics;
-pub mod kernel_parameters;
+pub(crate) mod kernel_parameters;
 pub mod logging;
 pub mod monitor;
 pub mod nvml;
-pub mod pci;
-pub mod radeon;
-pub mod state;
-pub mod util;
+pub(crate) mod pci;
+pub(crate) mod radeon;
+pub(crate) mod state;
+pub(crate) mod util;
 pub mod watcher;
 
-pub static DBUS_NAME: &str = "com.vintagetechie.PowerCurve";
-pub static DBUS_PATH: &str = "/com/vintagetechie/PowerCurve";
+pub(crate) static DBUS_NAME: &str = "com.vintagetechie.PowerCurve";
+pub(crate) static DBUS_PATH: &str = "/com/vintagetechie/PowerCurve";
 
 #[derive(Copy, Clone, Debug)]
-pub enum Profile {
+pub(crate) enum Profile {
     Quiet,
     Balanced,
     Performance,
