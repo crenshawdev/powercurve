@@ -6,6 +6,9 @@ use fern::{Dispatch, InitError};
 use log::LevelFilter;
 use std::io;
 
+/// Install the stderr logger at the given level, scoped to this crate.
+///
+/// Logs from dependencies stay silent regardless of `filter`.
 pub fn setup(filter: LevelFilter) -> Result<(), InitError> {
     Dispatch::new()
         // Exclude logs for crates that we use

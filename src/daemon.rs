@@ -518,7 +518,7 @@ impl UPowerPowerProfiles {
     }
 }
 
-pub struct NetHadessPowerProfiles(UPowerPowerProfiles);
+struct NetHadessPowerProfiles(UPowerPowerProfiles);
 
 #[zbus::dbus_interface(name = "net.hadess.PowerProfiles")]
 impl NetHadessPowerProfiles {
@@ -548,6 +548,9 @@ impl NetHadessPowerProfiles {
     }
 }
 
+/// Daemon entry point. Owns the system-bus connection, registers the three
+/// D-Bus interfaces (PowerCurve, UPower.PowerProfiles, net.hadess), and runs
+/// until SIGTERM or SIGINT.
 #[tokio::main(flavor = "current_thread")]
 pub async fn daemon() -> anyhow::Result<()> {
     let signal_handling_fut = signal_handling();

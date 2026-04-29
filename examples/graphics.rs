@@ -1,3 +1,5 @@
+//! Example: enumerate display-class PCI devices grouped by vendor.
+
 use log::LevelFilter;
 use powercurve::{graphics::Graphics, logging};
 use std::{io, process};

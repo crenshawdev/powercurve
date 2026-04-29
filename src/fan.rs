@@ -69,12 +69,16 @@ pub(crate) struct ChannelConfig {
     pub profiles: Option<HashMap<String, ChannelProfileConfig>>,
 }
 
+/// Failures from `FanDaemon::new` and `FanDaemon::step`.
 #[derive(Debug, thiserror::Error)]
 pub enum FanDaemonError {
+    /// Reading the hwmon class directory failed.
     #[error("failed to collect hwmon devices: {}", _0)]
     HwmonDevices(io::Error),
+    /// No hwmon device matched the configured `platform` name.
     #[error("platform hwmon not found")]
     PlatformHwmonNotFound,
+    /// No `coretemp` or `k10temp` hwmon device was found.
     #[error("cpu hwmon not found")]
     CpuHwmonNotFound,
 }
@@ -93,12 +97,20 @@ pub enum TempSource {
 /// Maps a single PWM output to a temperature source and fan curve.
 #[derive(Clone, Debug)]
 pub struct FanChannel {
+    /// PWM channel name (for example `pwm3`).
     pub pwm: String,
+    /// Which sensors feed this channel's curve.
     pub source: TempSource,
+    /// Active fan curve. May be the shared curve, a profile curve, or a
+    /// channel-specific override depending on config and active profile.
     pub curve: FanCurve,
+    /// Optional minimum duty floor in raw 0-255 units.
     pub min_duty: Option<u8>,
+    /// Watch this channel for stalls (RPM near zero while duty is non-zero).
     pub stall_detect: bool,
+    /// Consecutive stalled samples before a `StallEvent` fires.
     pub stall_threshold: u32,
+    /// Skip curve control entirely and let firmware drive the fan.
     pub passthrough: bool,
 }
 
@@ -119,19 +131,33 @@ struct ChannelDef {
 /// Snapshot of the fan daemon's current state, shared with D-Bus handlers.
 #[derive(Clone, Default)]
 pub struct FanStatus {
+    /// Last CPU temperature reading in millidegrees.
     pub cpu_temp: Option<u32>,
+    /// Last GPU temperature reading in millidegrees.
     pub gpu_temp: Option<u32>,
+    /// Per-channel last applied duty in raw 0-255 units.
     pub channel_duties: Vec<(String, Option<u8>)>,
+    /// Per-channel curve points as (Celsius, percent) tuples.
     pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
+    /// Active per-channel duty overrides (percent).
     pub overrides: HashMap<String, u8>,
+    /// Per-channel minimum duty floor in raw 0-255 units.
     pub min_duties: Vec<(String, Option<u8>)>,
+    /// Per-channel last RPM reading.
     pub rpms: Vec<(String, Option<u32>)>,
+    /// Channels currently flagged as stalled.
     pub stalled: Vec<String>,
+    /// Channels in firmware passthrough mode.
     pub passthrough: Vec<String>,
+    /// True when any source is over its critical threshold.
     pub critical: bool,
+    /// True when `/etc/powercurve/fan.toml` loaded successfully.
     pub config_loaded: bool,
 }
 
+/// Curve evaluator and fan controller. Owns the hwmon handles for CPU, GPU,
+/// and platform sensors, the per-channel curves, and the most recently
+/// applied duties.
 pub struct FanDaemon {
     channels: Vec<FanChannel>,
     channel_defs: Vec<ChannelDef>,
@@ -741,15 +767,17 @@ fn parse_temp_source(s: &str) -> TempSource {
     }
 }
 
+/// One point on a fan curve. Temperature is hundredths of a degree
+/// (10000 = 100C), duty is hundredths of a percent (10000 = 100%).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FanPoint {
-    // Temperature in hundredths of a degree, 10000 = 100C
     temp: i16,
-    // duty in hundredths of a percent, 10000 = 100%
     duty: u16,
 }
 
 impl FanPoint {
+    /// Build a point from a temperature and duty in the units described
+    /// on the type itself.
     pub const fn new(temp: i16, duty: u16) -> Self {
         Self { temp, duty }
     }
@@ -789,6 +817,9 @@ impl FanPoint {
     }
 }
 
+/// An ordered list of `FanPoint`s. Looking up a duty for a given temperature
+/// returns 0 below the first point, the last point's duty above the last,
+/// and a linear interpolation in between.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FanCurve {
     points: Vec<FanPoint>,
@@ -822,6 +853,8 @@ impl FanCurve {
         self.points.iter().map(|p| (f32::from(p.temp) / 100.0, f32::from(p.duty) / 100.0)).collect()
     }
 
+    /// Look up the duty for a temperature. Returns `None` only when the
+    /// curve has no points.
     pub fn get_duty(&self, temp: i16) -> Option<u16> {
         // Below the curve means fans off
         if let Some(first) = self.points.first()

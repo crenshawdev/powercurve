@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+//! `powercurve` binary: parses CLI args and dispatches to the daemon, monitor,
+//! watcher, fan tooling, or D-Bus client based on the chosen subcommand.
+
 #![deny(clippy::all)]
 
 use clap::Parser;
