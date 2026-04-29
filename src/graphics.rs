@@ -12,6 +12,7 @@ pub struct GraphicsDevice {
 }
 
 impl GraphicsDevice {
+    /// Wrap an enumerated set of PCI functions as a single graphics device.
     #[must_use]
     pub fn new(functions: Vec<PciDevice>) -> Self {
         Self { functions }
@@ -26,10 +27,15 @@ impl GraphicsDevice {
 
 /// Enumerates GPUs on the PCI bus, grouped by vendor.
 pub struct Graphics {
+    /// PCI bus handle used to trigger rescans.
     pub bus: PciBus,
+    /// AMD display-class devices (vendor 0x1002).
     pub amd: Vec<GraphicsDevice>,
+    /// Intel display-class devices (vendor 0x8086).
     pub intel: Vec<GraphicsDevice>,
+    /// NVIDIA display-class devices (vendor 0x10DE).
     pub nvidia: Vec<GraphicsDevice>,
+    /// Anything else with a display class code.
     pub other: Vec<GraphicsDevice>,
 }
 

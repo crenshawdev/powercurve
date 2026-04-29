@@ -1,3 +1,6 @@
+//! Example: drive `FanDaemon` directly in a 1Hz loop without the daemon
+//! binary or D-Bus, as a smoke test for the curve evaluator.
+
 use log::LevelFilter;
 use powercurve::{
     fan::{FanDaemon, FanDaemonError},

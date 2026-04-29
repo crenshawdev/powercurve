@@ -25,6 +25,8 @@ async fn profile(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     Ok(())
 }
 
+/// CLI entry point for client subcommands. Connects to the running daemon
+/// over the system bus and dispatches the requested action.
 #[tokio::main(flavor = "current_thread")]
 pub async fn client(args: &Args) -> anyhow::Result<()> {
     let connection =
