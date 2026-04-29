@@ -230,6 +230,9 @@ pub async fn run() -> anyhow::Result<()> {
     crate::logging::setup(LevelFilter::Info).ok();
 
     // Ignore SIGHUP so daemon reload signals don't kill us.
+    // SAFETY: SIG_IGN is documented by POSIX as a safe disposition for any
+    // signal. We install it once at startup before any other thread exists,
+    // so there is no concurrent signal-handler mutation to race against.
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
     }
