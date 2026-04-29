@@ -129,3 +129,9 @@ version = "1.0"
 features = ["derive"]
 
 [workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"

@@ -230,6 +230,9 @@ pub async fn run() -> anyhow::Result<()> {
     crate::logging::setup(LevelFilter::Info).ok();
 
     // Ignore SIGHUP so daemon reload signals don't kill us.
+    // SAFETY: SIG_IGN is documented by POSIX as a safe disposition for any
+    // signal. We install it once at startup before any other thread exists,
+    // so there is no concurrent signal-handler mutation to race against.
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
     }
@@ -295,30 +298,26 @@ pub async fn run() -> anyhow::Result<()> {
             .map(String::from)
             .or_else(|| settings.default_profile.as_ref().map(|s| s.to_lowercase()));
 
-        let should_switch = match (&desired, &last_set) {
-            (Some(d), Some(l)) => d != l,
-            (Some(_), None) => true,
-            (None, _) => false,
-        };
+        if let Some(profile) = &desired {
+            let needs_switch = last_set.as_deref() != Some(profile.as_str());
 
-        if should_switch {
-            let profile = desired.as_ref().expect("checked Some above");
-
-            if let Some(ref matched_rule) = target {
-                log::info!("rule matched '{}', switching to {}", matched_rule, profile);
-            } else {
-                log::info!("no rules match, restoring default profile {}", profile);
-            }
-
-            match set_profile(&client, profile).await {
-                Ok(()) => {
-                    println!("profile: {}", profile);
-                    last_set = Some(profile.clone());
+            if needs_switch {
+                if let Some(ref matched_rule) = target {
+                    log::info!("rule matched '{}', switching to {}", matched_rule, profile);
+                } else {
+                    log::info!("no rules match, restoring default profile {}", profile);
                 }
-                Err(e) => {
-                    log::warn!("failed to set profile: {}", e);
-                    // Reset so we retry next cycle when the daemon comes back.
-                    last_set = None;
+
+                match set_profile(&client, profile).await {
+                    Ok(()) => {
+                        println!("profile: {}", profile);
+                        last_set = Some(profile.clone());
+                    }
+                    Err(e) => {
+                        log::warn!("failed to set profile: {}", e);
+                        // Reset so we retry next cycle when the daemon comes back.
+                        last_set = None;
+                    }
                 }
             }
         }
@@ -328,6 +327,7 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 

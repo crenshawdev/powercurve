@@ -62,6 +62,8 @@ impl NvmlHandle {
     /// Returns None if the library can't be loaded, init fails, or no
     /// devices are found. Each failure is logged with the specific reason.
     pub fn open() -> Option<Self> {
+        // SAFETY: dlopen with a bare library name and RTLD_LAZY is always
+        // safe to call. The returned pointer is checked for null immediately.
         // dlopen the library
         let lib = unsafe { libc::dlopen(c"libnvidia-ml.so.1".as_ptr(), libc::RTLD_LAZY) };
         if lib.is_null() {
@@ -69,6 +71,11 @@ impl NvmlHandle {
             return None;
         }
 
+        // SAFETY: lib is a non-null handle confirmed above. Each symbol name
+        // matches NVML's documented ABI for that entry point. The resolved
+        // function pointers are valid for the lifetime of lib, and lib is kept
+        // alive in Self until Drop. dlclose on early-return paths is safe
+        // because no resolved pointers escape before we reach Some(Self{...}).
         // Resolve all the symbols we need
         let init: InitFn = match unsafe { resolve(lib, c"nvmlInit_v2") } {
             Some(f) => f,
@@ -116,6 +123,8 @@ impl NvmlHandle {
             }
         };
 
+        // SAFETY: init is a resolved, non-null function pointer whose
+        // signature matches nvmlInit_v2. The library is loaded and live.
         // Initialize NVML
         let ret = unsafe { init() };
         if ret != NVML_SUCCESS {
@@ -124,6 +133,10 @@ impl NvmlHandle {
             return None;
         }
 
+        // SAFETY: get_count and get_handle are resolved, non-null function
+        // pointers matching their respective NVML ABI signatures. NVML is
+        // initialized at this point. The mutable references passed are local
+        // stack variables so there are no aliasing hazards.
         // Enumerate devices
         let mut count: c_uint = 0;
         let ret = unsafe { get_count(&mut count) };
@@ -171,6 +184,10 @@ impl NvmlHandle {
 
         for (i, &device) in self.devices.iter().enumerate() {
             let mut temp: c_uint = 0;
+            // SAFETY: get_temp is a valid function pointer for the lifetime of
+            // self (lib is live). device was obtained from nvmlDeviceGetHandleByIndex
+            // and remains valid while the library is loaded. temp is a local
+            // stack variable with no aliasing.
             let ret = unsafe { (self.get_temp)(device, NVML_TEMPERATURE_GPU, &mut temp) };
 
             if ret == NVML_SUCCESS {
@@ -194,6 +211,11 @@ impl NvmlHandle {
 
 impl Drop for NvmlHandle {
     fn drop(&mut self) {
+        // SAFETY: shutdown is a valid function pointer and NVML is still
+        // initialized at drop time. lib is the non-null handle from dlopen;
+        // dlclose is safe here because no function pointers from this handle
+        // escape Self, so nothing will call into the unloaded library after
+        // this point.
         unsafe {
             (self.shutdown)();
             libc::dlclose(self.lib);

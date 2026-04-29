@@ -276,6 +276,7 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::fan::{ChannelConfig, ChannelProfileConfig, CurvePoint, FanConfig, ProfileConfig};

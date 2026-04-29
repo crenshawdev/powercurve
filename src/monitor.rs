@@ -11,6 +11,9 @@ use zbus::Connection;
 pub async fn run() -> anyhow::Result<()> {
     // Ignore SIGHUP so `kill -HUP $(pidof powercurve)` only reloads
     // the daemon without killing the monitor.
+    // SAFETY: SIG_IGN is documented by POSIX as a safe disposition for any
+    // signal. We install it once at startup before any other thread exists,
+    // so there is no concurrent signal-handler mutation to race against.
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
     }
