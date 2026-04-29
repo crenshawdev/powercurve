@@ -16,3 +16,7 @@ vendor.tar.xz
 *.pkg.tar.zst
 *.pkg.tar.xz
 *.tar.gz
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
