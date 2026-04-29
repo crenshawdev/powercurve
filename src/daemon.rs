@@ -43,9 +43,9 @@ static CONTINUE: AtomicBool = AtomicBool::new(true);
 static RELOAD: AtomicBool = AtomicBool::new(false);
 
 /// Wait for SIGINT or SIGTERM, then signal the main loop to exit.
-async fn signal_handling() {
-    let mut int = signal(SignalKind::interrupt()).expect("failed to register SIGINT handler");
-    let mut term = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+async fn signal_handling() -> anyhow::Result<()> {
+    let mut int = signal(SignalKind::interrupt()).context("failed to register SIGINT handler")?;
+    let mut term = signal(SignalKind::terminate()).context("failed to register SIGTERM handler")?;
 
     let sig = tokio::select! {
         _ = int.recv() => "SIGINT",
@@ -54,14 +54,15 @@ async fn signal_handling() {
 
     log::info!("caught signal: {}", sig);
     CONTINUE.store(false, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Listen for SIGHUP and flag a config reload on each occurrence.
 ///
 /// Runs until cancelled by the caller (via tokio::select). The loop
 /// itself never checks CONTINUE since cancellation handles shutdown.
-async fn sighup_handling() {
-    let mut hup = signal(SignalKind::hangup()).expect("failed to register SIGHUP handler");
+async fn sighup_handling() -> anyhow::Result<()> {
+    let mut hup = signal(SignalKind::hangup()).context("failed to register SIGHUP handler")?;
     loop {
         hup.recv().await;
         log::info!("caught SIGHUP, scheduling config reload");
@@ -757,8 +758,8 @@ pub async fn daemon() -> anyhow::Result<()> {
     let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
 
     tokio::select! {
-        _ = signal_handling_fut => {},
-        _ = sighup_fut => {},
+        r = signal_handling_fut => r?,
+        r = sighup_fut => r?,
         _ = main_loop => {},
     };
 
