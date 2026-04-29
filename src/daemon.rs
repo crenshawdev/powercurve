@@ -796,9 +796,9 @@ where
     I: zbus::Interface,
     F: Fn() -> I,
 {
-    let mut last_err = None;
-
-    for attempt in 1..=MAX_DBUS_RETRIES {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
         let result = zbus::ConnectionBuilder::system()
             .context("failed to create zbus connection builder")?
             .name(bus_name)
@@ -810,28 +810,26 @@ where
 
         match result {
             Ok(conn) => return Ok(conn),
+            Err(e) if attempt >= MAX_DBUS_RETRIES => {
+                return Err(anyhow::anyhow!(
+                    "failed to acquire {} after {} attempts, check if another instance is running: {}",
+                    bus_name,
+                    MAX_DBUS_RETRIES,
+                    e,
+                ));
+            }
             Err(e) => {
-                if attempt < MAX_DBUS_RETRIES {
-                    let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
-                    log::warn!(
-                        "{}: attempt {}/{} failed ({}), retrying in {}ms",
-                        bus_name,
-                        attempt,
-                        MAX_DBUS_RETRIES,
-                        e,
-                        delay.as_millis(),
-                    );
-                    sleep(delay).await;
-                }
-                last_err = Some(e);
+                let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                log::warn!(
+                    "{}: attempt {}/{} failed ({}), retrying in {}ms",
+                    bus_name,
+                    attempt,
+                    MAX_DBUS_RETRIES,
+                    e,
+                    delay.as_millis(),
+                );
+                sleep(delay).await;
             }
         }
     }
-
-    Err(anyhow::anyhow!(
-        "failed to acquire {} after {} attempts, check if another instance is running: {}",
-        bus_name,
-        MAX_DBUS_RETRIES,
-        last_err.expect("retry loop ran at least once"),
-    ))
 }
