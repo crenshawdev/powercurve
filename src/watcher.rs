@@ -505,4 +505,11 @@ mod tests {
         let clamped = settings.poll_interval.max(1);
         assert_eq!(clamped, 1);
     }
+
+    #[test]
+    fn parses_watcher_example() {
+        let toml_str = include_str!("../examples/watcher.toml");
+        let config: WatcherConfig = toml::from_str(toml_str).unwrap();
+        let _ = compile_rules(config).expect("should compile");
+    }
 }
