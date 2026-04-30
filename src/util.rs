@@ -13,12 +13,12 @@ pub fn write_value<V: Display>(path: &str, value: V) {
     // eprintln!("writing {} to {}", value, path);
     let write_to_file = |path, value| -> io::Result<()> {
         let mut file = File::create(path)?;
-        write!(file, "{}", value)?;
+        write!(file, "{value}")?;
 
         Ok(())
     };
 
     if let Err(why) = write_to_file(path, value) {
-        eprintln!("failed to set value in {}: {}", path, why);
+        eprintln!("failed to set value in {path}: {why}");
     }
 }

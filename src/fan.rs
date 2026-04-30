@@ -291,9 +291,8 @@ impl FanDaemon {
             }
         } else {
             log::warn!(
-                "no fan config found at {}, fan control disabled. \
-                 run `powercurve fan-detect --generate` to create one",
-                CONFIG_PATH
+                "no fan config found at {CONFIG_PATH}, fan control disabled. \
+                 run `powercurve fan-detect --generate` to create one"
             );
             self.channels.clear();
             self.channel_defs.clear();
@@ -313,7 +312,7 @@ impl FanDaemon {
         if !self.platform_names.is_empty()
             && let Err(err) = self.discover()
         {
-            log::error!("fan daemon: {}", err);
+            log::error!("fan daemon: {err}");
         }
 
         let active = self.channels.iter().filter(|ch| !ch.passthrough).count();
@@ -332,7 +331,7 @@ impl FanDaemon {
     pub fn reload(&mut self) {
         use crate::config_check::{self, Severity};
 
-        log::info!("reloading fan config from {}", CONFIG_PATH);
+        log::info!("reloading fan config from {CONFIG_PATH}");
 
         let config = match load_config() {
             Some(c) => c,
@@ -354,7 +353,7 @@ impl FanDaemon {
         }
 
         if errors > 0 {
-            log::error!("reload aborted: config has {} error(s)", errors);
+            log::error!("reload aborted: config has {errors} error(s)");
             return;
         }
 
@@ -407,7 +406,7 @@ impl FanDaemon {
             s.overrides.clear();
         }
 
-        log::info!("fan curves updated for profile: {}", profile);
+        log::info!("fan curves updated for profile: {profile}");
     }
 
     /// Discover all utilizable hwmon devices.
@@ -418,7 +417,7 @@ impl FanDaemon {
 
         for hwmon in HwMon::all().map_err(FanDaemonError::HwmonDevices)? {
             if let Ok(name) = hwmon.name() {
-                log::debug!("hwmon: {}", name);
+                log::debug!("hwmon: {name}");
 
                 match name.as_str() {
                     "amdgpu" => self.amdgpus.push(hwmon),
@@ -450,7 +449,7 @@ impl FanDaemon {
             .filter_map(|temp| temp.input().ok())
             .fold(None, |best, val| {
                 if best.is_none_or(|b| val > b) {
-                    log::debug!("highest cpu temp: {}", val);
+                    log::debug!("highest cpu temp: {val}");
                     Some(val)
                 } else {
                     best
@@ -467,7 +466,7 @@ impl FanDaemon {
             .filter_map(|temp| temp.input().ok())
             .fold(None, |best, val| {
                 if best.is_none_or(|b| val > b) {
-                    log::debug!("highest amdgpu temp: {}", val);
+                    log::debug!("highest amdgpu temp: {val}");
                     Some(val)
                 } else {
                     best
@@ -484,7 +483,7 @@ impl FanDaemon {
             }
             NvidiaState::Active(ref nvml) => {
                 if let Some(nv_temp) = nvml.max_gpu_temp() {
-                    log::debug!("highest nvidia temp: {}", nv_temp);
+                    log::debug!("highest nvidia temp: {nv_temp}");
                     temp_opt = Some(temp_opt.map_or(nv_temp, |t| cmp::max(nv_temp, t)));
                 }
             }
@@ -516,11 +515,11 @@ impl FanDaemon {
     /// The enable file is derived from the channel name (e.g. "pwm2" -> "pwm2_enable")
     /// so each channel controls its own hwmon output independently.
     fn set_channel_duty(&self, pwm: &str, duty_opt: Option<u8>) {
-        let enable_file = format!("{}_enable", pwm);
+        let enable_file = format!("{pwm}_enable");
         for platform in &self.platforms {
             if let Some(duty) = duty_opt {
                 let _ = platform.write_file(&enable_file, "1");
-                let _ = platform.write_file(pwm, format!("{}", duty));
+                let _ = platform.write_file(pwm, format!("{duty}"));
             } else {
                 let _ = platform.write_file(&enable_file, "2");
             }
@@ -740,11 +739,11 @@ pub(crate) fn load_config() -> Option<FanConfig> {
     let contents = fs::read_to_string(CONFIG_PATH).ok()?;
     match toml::from_str(&contents) {
         Ok(config) => {
-            log::info!("loaded fan config from {}", CONFIG_PATH);
+            log::info!("loaded fan config from {CONFIG_PATH}");
             Some(config)
         }
         Err(err) => {
-            log::error!("failed to parse {}: {}", CONFIG_PATH, err);
+            log::error!("failed to parse {CONFIG_PATH}: {err}");
             None
         }
     }

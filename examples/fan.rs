@@ -20,12 +20,12 @@ fn inner() -> Result<(), FanDaemonError> {
 
 fn main() {
     if let Err(why) = logging::setup(LevelFilter::Debug) {
-        eprintln!("failed to set up logging: {}", why);
+        eprintln!("failed to set up logging: {why}");
         process::exit(1);
     }
 
     if let Err(err) = inner() {
-        eprintln!("{:?}", err);
+        eprintln!("{err:?}");
         process::exit(1);
     }
 }

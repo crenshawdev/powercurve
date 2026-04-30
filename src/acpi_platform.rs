@@ -67,6 +67,6 @@ pub fn performance() {
 /// Applies the ACPI platform profile.
 fn apply_profile(profile: &str) {
     if let Err(why) = fs::write(SYSFS_PATH, profile) {
-        log::error!("ACPI Platform Profile: could not set to {}: {}", profile, why);
+        log::error!("ACPI Platform Profile: could not set to {profile}: {why}");
     }
 }

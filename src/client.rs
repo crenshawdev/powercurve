@@ -11,7 +11,7 @@ use std::io;
 async fn profile(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     let profile = client.get_profile().await.ok();
     let profile = profile.as_ref().map_or("?", |s| s.as_str());
-    println!("Power Profile: {}", profile);
+    println!("Power Profile: {profile}");
 
     if let Ok(values) = PState::new().and_then(|pstate| pstate.values()) {
         println!(
@@ -63,7 +63,7 @@ pub async fn client(args: &Args) -> anyhow::Result<()> {
 async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     let profile = client.get_profile().await.ok();
     let profile = profile.as_ref().map_or("?", |s| s.as_str());
-    println!("Profile: {}", profile);
+    println!("Profile: {profile}");
 
     if let Ok((cpu, gpu)) = client.get_temperatures().await {
         if cpu >= 0 {
@@ -83,13 +83,13 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     if let Ok(duties) = client.get_fan_duties().await {
         for (name, duty) in &duties {
             if passthrough.iter().any(|p| p == name) {
-                println!("{}: [passthrough]", name);
+                println!("{name}: [passthrough]");
                 continue;
             }
             let override_tag = overrides
                 .iter()
                 .find(|(k, _)| k == name)
-                .map(|(_, pct)| format!(" [override {}%]", pct))
+                .map(|(_, pct)| format!(" [override {pct}%]"))
                 .unwrap_or_default();
             let floor_tag = floors
                 .iter()
@@ -105,17 +105,16 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
             let rpm_tag = rpms
                 .iter()
                 .find(|(k, _)| k == name)
-                .and_then(|(_, r)| if *r >= 0 { Some(format!(" [{} RPM]", r)) } else { None })
+                .and_then(|(_, r)| if *r >= 0 { Some(format!(" [{r} RPM]")) } else { None })
                 .unwrap_or_default();
             let stall_tag = if stalled.iter().any(|s| s == name) { " [STALLED]" } else { "" };
             if *duty >= 0 {
                 let pct = (*duty as f64 / 255.0) * 100.0;
                 println!(
-                    "{}: {}/255 ({:.0}%){}{}{}{}",
-                    name, duty, pct, override_tag, floor_tag, rpm_tag, stall_tag
+                    "{name}: {duty}/255 ({pct:.0}%){override_tag}{floor_tag}{rpm_tag}{stall_tag}"
                 );
             } else {
-                println!("{}: --{}{}{}{}", name, override_tag, floor_tag, rpm_tag, stall_tag);
+                println!("{name}: --{override_tag}{floor_tag}{rpm_tag}{stall_tag}");
             }
         }
     }
@@ -125,8 +124,7 @@ async fn status(client: &mut PowerCurveProxy<'_>) -> io::Result<()> {
     {
         println!("\nCurves:");
         for (name, points) in &curves {
-            let pts: Vec<String> =
-                points.iter().map(|(t, d)| format!("{:.0}C/{:.0}%", t, d)).collect();
+            let pts: Vec<String> = points.iter().map(|(t, d)| format!("{t:.0}C/{d:.0}%")).collect();
             println!("  {}: {}", name, pts.join(" "));
         }
     }
@@ -151,18 +149,18 @@ async fn fan_override(
 ) -> anyhow::Result<()> {
     if duty == "clear" {
         client.clear_fan_override(channel).await.map_err(zbus_error)?;
-        println!("{}: override cleared", channel);
+        println!("{channel}: override cleared");
     } else {
         let pct: u8 = duty.parse().context("duty must be 0-100 or 'clear'")?;
         if pct > 100 {
             anyhow::bail!("duty must be 0-100");
         }
         client.set_fan_override(channel, pct).await.map_err(zbus_error)?;
-        println!("{}: override set to {}%", channel, pct);
+        println!("{channel}: override set to {pct}%");
     }
     Ok(())
 }
 
 fn zbus_error(why: zbus::Error) -> anyhow::Error {
-    anyhow::anyhow!("{}", why)
+    anyhow::anyhow!("{why}")
 }

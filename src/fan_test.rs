@@ -46,7 +46,7 @@ pub async fn run(
     let start = start.min(99);
     let settle = Duration::from_millis(settle_ms.max(500));
 
-    println!("testing {} ({}% to 100%, step {}%, settle {}ms)", channel, start, step, settle_ms);
+    println!("testing {channel} ({start}% to 100%, step {step}%, settle {settle_ms}ms)");
     println!();
 
     // Install Ctrl-C handler that clears the override before exiting.
@@ -57,7 +57,7 @@ pub async fn run(
     client
         .set_fan_override(channel, 0)
         .await
-        .map_err(|e| anyhow::anyhow!("failed to set override: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to set override: {e}"))?;
     tokio::time::sleep(settle).await;
 
     let mut floor: Option<u8> = None;
@@ -71,7 +71,7 @@ pub async fn run(
         client
             .set_fan_override(channel, pct)
             .await
-            .map_err(|e| anyhow::anyhow!("failed to set override: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("failed to set override: {e}"))?;
 
         // Wait for the duty to be applied and the motor to respond,
         // but also watch for Ctrl-C so we can clean up.
@@ -87,8 +87,8 @@ pub async fn run(
         let rpm = read_channel_rpm(client, channel).await;
 
         match rpm {
-            Some(r) => println!("  {}% -> {} RPM", pct, r),
-            None => println!("  {}% -> ? RPM", pct),
+            Some(r) => println!("  {pct}% -> {r} RPM"),
+            None => println!("  {pct}% -> ? RPM"),
         }
 
         if rpm.is_some_and(|r| r > 0) {
@@ -105,11 +105,11 @@ pub async fn run(
     println!();
     match floor {
         Some(pct) => {
-            println!("{} spins at {}%", channel, pct);
+            println!("{channel} spins at {pct}%");
             println!("suggested config: min_duty = {:.1}", pct as f64);
         }
         None => {
-            println!("{}: no spin detected up to 100%", channel);
+            println!("{channel}: no spin detected up to 100%");
             println!("check that the fan is connected and the tachometer works");
         }
     }

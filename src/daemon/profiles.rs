@@ -121,7 +121,7 @@ fn pci_device_runtime_pm(pm: RuntimePowerManagement) -> Result<(), PciDeviceErro
                 .set_runtime_pm(pm)
                 .map_err(|why| PciDeviceError::SetRuntimePm(device.id().to_owned(), why))?,
             Err(why) => {
-                log::warn!("failed to iterate PCI device: {}", why);
+                log::warn!("failed to iterate PCI device: {why}");
             }
         }
     }
@@ -140,7 +140,7 @@ fn scsi_host_link_time_pm_policy(policies: &'static [&'static str]) {
                 }
             }
             Err(why) => {
-                log::warn!("failed to iterate SCSI Host device: {}", why);
+                log::warn!("failed to iterate SCSI Host device: {why}");
             }
         }
     }
