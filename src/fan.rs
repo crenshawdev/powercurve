@@ -1384,4 +1384,26 @@ mod tests {
         assert!(config.channels[0].passthrough.is_none());
         assert_eq!(config.channels[1].passthrough, Some(true));
     }
+
+    #[test]
+    fn parses_fan_simple_example() {
+        let toml_str = include_str!("../examples/fan-simple.toml");
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.channels.is_empty());
+    }
+
+    #[test]
+    fn parses_fan_desktop_example() {
+        let toml_str = include_str!("../examples/fan-desktop.toml");
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.channels.is_empty());
+    }
+
+    #[test]
+    fn parses_fan_profiles_example() {
+        let toml_str = include_str!("../examples/fan-profiles.toml");
+        let config: FanConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.channels.is_empty());
+        assert!(config.profiles.is_some());
+    }
 }
