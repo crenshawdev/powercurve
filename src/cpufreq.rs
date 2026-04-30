@@ -51,7 +51,7 @@ pub fn set(profile: Profile, max_percent: u8) {
 
         if let Some((cpus, (min, max))) = num_cpus().zip(min_freq.zip(max_freq)) {
             let max = max * max_percent.min(100) as usize / 100;
-            eprintln!("setting {} with max {}", governor, max);
+            eprintln!("setting {governor} with max {max}");
 
             for cpu in 0..=cpus {
                 core.load(cpu);
@@ -152,5 +152,5 @@ pub fn num_cpus() -> Option<usize> {
 }
 
 fn cpu_path(buffer: &mut String, core: usize) {
-    let _ = write!(buffer, "/sys/devices/system/cpu/cpu{}/cpufreq/", core);
+    let _ = write!(buffer, "/sys/devices/system/cpu/cpu{core}/cpufreq/");
 }

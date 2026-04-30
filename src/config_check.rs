@@ -31,7 +31,7 @@ pub fn run() -> anyhow::Result<()> {
     let contents = match fs::read_to_string(CONFIG_PATH) {
         Ok(c) => c,
         Err(e) => {
-            println!("error: cannot read {}: {}", CONFIG_PATH, e);
+            println!("error: cannot read {CONFIG_PATH}: {e}");
             std::process::exit(1);
         }
     };
@@ -39,7 +39,7 @@ pub fn run() -> anyhow::Result<()> {
     let config: FanConfig = match toml::from_str(&contents) {
         Ok(c) => c,
         Err(e) => {
-            println!("error: failed to parse {}: {}", CONFIG_PATH, e);
+            println!("error: failed to parse {CONFIG_PATH}: {e}");
             std::process::exit(1);
         }
     };
@@ -60,9 +60,9 @@ pub fn run() -> anyhow::Result<()> {
     if errors == 0 && warnings == 0 {
         println!("config ok");
     } else if errors == 0 {
-        println!("\n{} warning(s), no errors", warnings);
+        println!("\n{warnings} warning(s), no errors");
     } else {
-        println!("\n{} error(s), {} warning(s)", errors, warnings);
+        println!("\n{errors} error(s), {warnings} warning(s)");
         std::process::exit(1);
     }
 
@@ -85,7 +85,7 @@ pub(crate) fn validate(config: &FanConfig) -> Vec<Issue> {
 /// Check that curve points have strictly increasing temps and sane duty values.
 fn validate_curve(points: &[fan::CurvePoint], label: &str, issues: &mut Vec<Issue>) {
     if points.is_empty() {
-        issues.push(Issue::error(format!("{} curve has no points", label)));
+        issues.push(Issue::error(format!("{label} curve has no points")));
         return;
     }
 
@@ -129,17 +129,14 @@ fn validate_critical_temps(config: &FanConfig, issues: &mut Vec<Issue>) {
         && !(0.0..=20.0).contains(&h)
     {
         issues
-            .push(Issue::error(
-                format!("hysteresis {:.1}C is outside reasonable range (0-20)", h,),
-            ));
+            .push(Issue::error(format!("hysteresis {h:.1}C is outside reasonable range (0-20)",)));
     }
 
     if let Some(cd) = config.thermal_cooldown
         && (cd == 0 || cd > 300)
     {
         issues.push(Issue::error(format!(
-            "thermal_cooldown {}s is outside reasonable range (1-300)",
-            cd,
+            "thermal_cooldown {cd}s is outside reasonable range (1-300)",
         )));
     }
 }
@@ -221,12 +218,11 @@ fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
     for (name, profile) in profiles {
         if !valid_names.contains(&name.to_lowercase().as_str()) {
             issues.push(Issue::warning(format!(
-                "profile '{}': unknown profile name, expected one of: quiet, balanced, performance",
-                name,
+                "profile '{name}': unknown profile name, expected one of: quiet, balanced, performance",
             )));
         }
 
-        let label = format!("profile '{}'", name);
+        let label = format!("profile '{name}'");
         validate_curve(&profile.curve, &label, issues);
     }
 }
@@ -248,8 +244,7 @@ fn validate_hwmon(config: &FanConfig, issues: &mut Vec<Issue>) {
         && !names.iter().any(|n| n == platform)
     {
         issues.push(Issue::warning(format!(
-            "platform '{}' not found in hwmon devices on this machine",
-            platform,
+            "platform '{platform}' not found in hwmon devices on this machine",
         )));
     }
 

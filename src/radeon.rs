@@ -12,7 +12,7 @@ const AMD_VENDOR_ID: u16 = 0x1002;
 
 /// Check whether a DRM device belongs to AMD by reading its PCI vendor ID.
 fn is_amd_device(device_path: &str) -> bool {
-    let vendor_path = format!("{}/vendor", device_path);
+    let vendor_path = format!("{device_path}/vendor");
     std::fs::read_to_string(&vendor_path)
         .ok()
         .and_then(|v| {
@@ -58,7 +58,7 @@ pub struct RadeonDevice {
 impl RadeonDevice {
     #[must_use]
     pub fn new(card: u8) -> Option<Self> {
-        let path = format!("/sys/class/drm/card{}/device", card);
+        let path = format!("/sys/class/drm/card{card}/device");
 
         if !is_amd_device(&path) {
             return None;

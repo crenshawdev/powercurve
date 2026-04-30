@@ -128,7 +128,7 @@ impl NvmlHandle {
         // Initialize NVML
         let ret = unsafe { init() };
         if ret != NVML_SUCCESS {
-            log::warn!("nvml: nvmlInit_v2 failed with error {}", ret);
+            log::warn!("nvml: nvmlInit_v2 failed with error {ret}");
             unsafe { libc::dlclose(lib) };
             return None;
         }
@@ -141,7 +141,7 @@ impl NvmlHandle {
         let mut count: c_uint = 0;
         let ret = unsafe { get_count(&mut count) };
         if ret != NVML_SUCCESS {
-            log::warn!("nvml: nvmlDeviceGetCount_v2 failed with error {}", ret);
+            log::warn!("nvml: nvmlDeviceGetCount_v2 failed with error {ret}");
             unsafe { shutdown() };
             unsafe { libc::dlclose(lib) };
             return None;
@@ -159,7 +159,7 @@ impl NvmlHandle {
             let mut handle: NvmlDevice = std::ptr::null_mut();
             let ret = unsafe { get_handle(i, &mut handle) };
             if ret != NVML_SUCCESS {
-                log::warn!("nvml: failed to get handle for device {}: error {}", i, ret);
+                log::warn!("nvml: failed to get handle for device {i}: error {ret}");
                 continue;
             }
             devices.push(handle);
@@ -196,7 +196,7 @@ impl NvmlHandle {
                     best = Some(millideg);
                 }
             } else {
-                log::debug!("nvml: failed to read temp for device {}: error {}", i, ret);
+                log::debug!("nvml: failed to read temp for device {i}: error {ret}");
             }
         }
 

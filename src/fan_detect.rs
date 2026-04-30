@@ -114,7 +114,7 @@ fn discover_temps(hwmon_path: &Path) -> Vec<TempInput> {
     let mut temps = Vec::new();
 
     for i in 1..=16 {
-        let input_file = format!("temp{}_input", i);
+        let input_file = format!("temp{i}_input");
         let input_path = hwmon_path.join(&input_file);
         if !input_path.exists() {
             continue;
@@ -123,12 +123,12 @@ fn discover_temps(hwmon_path: &Path) -> Vec<TempInput> {
         let value =
             fs::read_to_string(&input_path).map(|v| v.trim().to_owned()).unwrap_or_default();
 
-        let label_file = format!("temp{}_label", i);
+        let label_file = format!("temp{i}_label");
         let label = fs::read_to_string(hwmon_path.join(label_file))
             .map(|l| l.trim().to_owned())
             .unwrap_or_default();
 
-        let crit_file = format!("temp{}_crit", i);
+        let crit_file = format!("temp{i}_crit");
         let crit = fs::read_to_string(hwmon_path.join(crit_file))
             .ok()
             .and_then(|v| v.trim().parse::<u32>().ok());
@@ -144,7 +144,7 @@ fn discover_pwms(hwmon_path: &Path) -> Vec<PwmOutput> {
     let mut pwms = Vec::new();
 
     for i in 1..=8 {
-        let pwm_file = format!("pwm{}", i);
+        let pwm_file = format!("pwm{i}");
         let pwm_path = hwmon_path.join(&pwm_file);
         if !pwm_path.exists() {
             continue;
@@ -154,16 +154,16 @@ fn discover_pwms(hwmon_path: &Path) -> Vec<PwmOutput> {
             .map(|v| v.trim().to_owned())
             .unwrap_or_else(|_| "?".into());
 
-        let max = fs::read_to_string(hwmon_path.join(format!("pwm{}_max", i)))
+        let max = fs::read_to_string(hwmon_path.join(format!("pwm{i}_max")))
             .map(|v| v.trim().to_owned())
             .unwrap_or_else(|_| "255".into());
 
         // Look for a matching fanN_input and fanN_label
-        let rpm = fs::read_to_string(hwmon_path.join(format!("fan{}_input", i)))
+        let rpm = fs::read_to_string(hwmon_path.join(format!("fan{i}_input")))
             .map(|v| v.trim().to_owned())
             .ok();
 
-        let label = fs::read_to_string(hwmon_path.join(format!("fan{}_label", i)))
+        let label = fs::read_to_string(hwmon_path.join(format!("fan{i}_label")))
             .map(|l| l.trim().to_owned())
             .unwrap_or_default();
 
@@ -272,8 +272,8 @@ fn generate_config(platform: &HwmonDevice, cpu_crit: u32, gpu_crit: u32) -> Stri
     let has_labels = platform.pwms.iter().any(|p| !p.label.is_empty());
 
     writeln!(out, "platform = \"{}\"", platform.name).ok();
-    writeln!(out, "critical_cpu_temp = {}", cpu_crit).ok();
-    writeln!(out, "critical_gpu_temp = {}", gpu_crit).ok();
+    writeln!(out, "critical_cpu_temp = {cpu_crit}").ok();
+    writeln!(out, "critical_gpu_temp = {gpu_crit}").ok();
     writeln!(out).ok();
     writeln!(out, "# Smooth fan curve with tight steps through the idle range and a").ok();
     writeln!(out, "# gentle ramp into load. Always-on floor at 10% avoids start/stop cycling.")
@@ -334,7 +334,7 @@ fn generate_config(platform: &HwmonDevice, cpu_crit: u32, gpu_crit: u32) -> Stri
         writeln!(out, "[[channels]]").ok();
         writeln!(out, "pwm = \"{}\"", pwm.file).ok();
         let source = if has_labels { source_from_label(&pwm.label) } else { "all" };
-        writeln!(out, "source = \"{}\"", source).ok();
+        writeln!(out, "source = \"{source}\"").ok();
     }
 
     if !has_labels {
