@@ -16,12 +16,12 @@ pub fn save_profile(name: &str) {
     if !dir.exists()
         && let Err(why) = fs::create_dir_all(dir)
     {
-        log::warn!("failed to create state directory {}: {}", STATE_DIR, why);
+        log::warn!("failed to create state directory {STATE_DIR}: {why}");
         return;
     }
 
     if let Err(why) = fs::write(STATE_FILE, name) {
-        log::warn!("failed to save profile state to {}: {}", STATE_FILE, why);
+        log::warn!("failed to save profile state to {STATE_FILE}: {why}");
     }
 }
 
@@ -34,7 +34,7 @@ pub fn load_profile() -> Option<String> {
     if VALID_PROFILES.contains(&trimmed) {
         Some(trimmed.to_string())
     } else {
-        log::warn!("ignoring unknown saved profile: {:?}", trimmed);
+        log::warn!("ignoring unknown saved profile: {trimmed:?}");
         None
     }
 }

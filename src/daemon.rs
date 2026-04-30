@@ -52,7 +52,7 @@ async fn signal_handling() -> anyhow::Result<()> {
         _ = term.recv() => "SIGTERM"
     };
 
-    log::info!("caught signal: {}", sig);
+    log::info!("caught signal: {sig}");
     CONTINUE.store(false, Ordering::SeqCst);
     Ok(())
 }
@@ -122,7 +122,7 @@ impl PowerDaemon {
         } else {
             let mut error_message = String::from("Errors found when setting profile:");
             for error in self.profile_errors.drain(..) {
-                error_message = format!("{}\n    - {}", error_message, error);
+                error_message = format!("{error_message}\n    - {error}");
             }
 
             Err(error_message)
@@ -173,13 +173,13 @@ impl PowerService {
     /// Acquire a read guard on the shared fan status, mapping poison errors
     /// to a D-Bus fault so handlers can `?` out uniformly.
     fn read_status(&self) -> zbus::fdo::Result<std::sync::RwLockReadGuard<'_, FanStatus>> {
-        self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))
+        self.1.read().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {e}")))
     }
 
     /// Acquire a write guard on the shared fan status, mapping poison errors
     /// to a D-Bus fault so handlers can `?` out uniformly.
     fn write_status(&self) -> zbus::fdo::Result<std::sync::RwLockWriteGuard<'_, FanStatus>> {
-        self.1.write().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {}", e)))
+        self.1.write().map_err(|e| zbus::fdo::Error::Failed(format!("status lock: {e}")))
     }
 }
 
@@ -609,7 +609,7 @@ pub async fn daemon() -> anyhow::Result<()> {
         .context("unable to create signal context")?;
 
     let initial_profile = state::load_profile().unwrap_or_else(|| String::from("Balanced"));
-    log::info!("restoring profile: {}", initial_profile);
+    log::info!("restoring profile: {initial_profile}");
 
     let init_result = match initial_profile.as_str() {
         "Quiet" => power_service.quiet(context.clone()).await,
@@ -618,7 +618,7 @@ pub async fn daemon() -> anyhow::Result<()> {
     };
 
     if let Err(why) = init_result {
-        log::error!("failed to set initial profile: {}", why);
+        log::error!("failed to set initial profile: {why}");
     }
 
     let sighup_fut = sighup_handling();
@@ -675,7 +675,7 @@ pub async fn daemon() -> anyhow::Result<()> {
                         _ => None,
                     };
                     if let Some(target) = next {
-                        log::warn!("thermal fallback: {} -> {}", current, target);
+                        log::warn!("thermal fallback: {current} -> {target}");
                         original_profile.get_or_insert(current);
                         fallback_active = true;
                         fallback_pending = true;
@@ -705,7 +705,7 @@ pub async fn daemon() -> anyhow::Result<()> {
                     cool_ticks += 1;
                     if cool_ticks >= thermal_cooldown {
                         if let Some(ref orig) = original_profile {
-                            log::info!("thermal recovery: restoring profile {}", orig);
+                            log::info!("thermal recovery: restoring profile {orig}");
                             fallback_pending = true;
                             let _ = match orig.as_str() {
                                 "Performance" => {
@@ -780,7 +780,7 @@ fn profile_to_upp_str(system76_profile: &str) -> &'static str {
 }
 
 fn zbus_error_from_display<E: Display>(why: E) -> zbus::fdo::Error {
-    zbus::fdo::Error::Failed(format!("{}", why))
+    zbus::fdo::Error::Failed(format!("{why}"))
 }
 
 const MAX_DBUS_RETRIES: u32 = 5;
@@ -815,10 +815,7 @@ where
             Ok(conn) => return Ok(conn),
             Err(e) if attempt >= MAX_DBUS_RETRIES => {
                 return Err(anyhow::anyhow!(
-                    "failed to acquire {} after {} attempts, check if another instance is running: {}",
-                    bus_name,
-                    MAX_DBUS_RETRIES,
-                    e,
+                    "failed to acquire {bus_name} after {MAX_DBUS_RETRIES} attempts, check if another instance is running: {e}",
                 ));
             }
             Err(e) => {

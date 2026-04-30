@@ -35,11 +35,11 @@ pub async fn run() -> anyhow::Result<()> {
             Some(signal) = profile_stream.next() => {
                 if let Ok(args) = signal.args() {
                     let profile = args.profile();
-                    println!("profile: {}", profile);
+                    println!("profile: {profile}");
                     let _ = notify(
                         &session,
                         "PowerCurve",
-                        &format!("Profile switched to {}", profile),
+                        &format!("Profile switched to {profile}"),
                     ).await;
                 }
             }
@@ -60,7 +60,7 @@ pub async fn run() -> anyhow::Result<()> {
                         ),
                         "fallback_up" => (
                             "Thermal Recovery",
-                            format!("Temps stable, restored profile to {}", profile),
+                            format!("Temps stable, restored profile to {profile}"),
                         ),
                         "critical" => (
                             "Critical Temperature",
@@ -69,10 +69,10 @@ pub async fn run() -> anyhow::Result<()> {
                                 temp as f64 / 1000.0,
                             ),
                         ),
-                        _ => ("PowerCurve", format!("{}: {}", event, profile)),
+                        _ => ("PowerCurve", format!("{event}: {profile}")),
                     };
 
-                    println!("{}: {}", summary, body);
+                    println!("{summary}: {body}");
                     let _ = notify(&session, summary, &body).await;
                 }
             }
@@ -80,8 +80,8 @@ pub async fn run() -> anyhow::Result<()> {
                 if let Ok(args) = signal.args() {
                     let channel = args.channel();
                     let duty = *args.duty();
-                    let body = format!("{} stalled at {}% duty (0 RPM)", channel, duty);
-                    println!("stall: {}", body);
+                    let body = format!("{channel} stalled at {duty}% duty (0 RPM)");
+                    println!("stall: {body}");
                     let _ = notify(&session, "Fan Stall Detected", &body).await;
                 }
             }

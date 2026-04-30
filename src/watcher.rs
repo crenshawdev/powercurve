@@ -80,8 +80,7 @@ fn compile_rules(config: WatcherConfig) -> anyhow::Result<(WatcherSettings, Vec<
         let lower = dp.to_lowercase();
         if !valid_profiles.contains(&lower.as_str()) {
             anyhow::bail!(
-                "invalid default_profile '{}', expected one of: quiet, balanced, performance",
-                dp
+                "invalid default_profile '{dp}', expected one of: quiet, balanced, performance"
             );
         }
     }
@@ -204,7 +203,7 @@ async fn set_profile(client: &PowerCurveProxy<'_>, profile: &str) -> anyhow::Res
         "quiet" => client.quiet().await?,
         "balanced" => client.balanced().await?,
         "performance" => client.performance().await?,
-        _ => anyhow::bail!("unknown profile '{}'", profile),
+        _ => anyhow::bail!("unknown profile '{profile}'"),
     }
     Ok(())
 }
@@ -303,18 +302,18 @@ pub async fn run() -> anyhow::Result<()> {
 
             if needs_switch {
                 if let Some(ref matched_rule) = target {
-                    log::info!("rule matched '{}', switching to {}", matched_rule, profile);
+                    log::info!("rule matched '{matched_rule}', switching to {profile}");
                 } else {
-                    log::info!("no rules match, restoring default profile {}", profile);
+                    log::info!("no rules match, restoring default profile {profile}");
                 }
 
                 match set_profile(&client, profile).await {
                     Ok(()) => {
-                        println!("profile: {}", profile);
+                        println!("profile: {profile}");
                         last_set = Some(profile.clone());
                     }
                     Err(e) => {
-                        log::warn!("failed to set profile: {}", e);
+                        log::warn!("failed to set profile: {e}");
                         // Reset so we retry next cycle when the daemon comes back.
                         last_set = None;
                     }

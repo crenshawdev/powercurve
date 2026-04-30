@@ -24,7 +24,7 @@ fn main() {
             } else {
                 LevelFilter::Info
             }) {
-                eprintln!("failed to set up logging: {}", why);
+                eprintln!("failed to set up logging: {why}");
                 process::exit(1);
             }
 
@@ -48,7 +48,7 @@ fn main() {
     match res {
         Ok(()) => (),
         Err(err) => {
-            eprintln!("{:?}", err);
+            eprintln!("{err:?}");
             process::exit(1);
         }
     }
