@@ -170,6 +170,28 @@ impl PowerService {
         }
     }
 
+    /// Apply a profile and emit the active-profile change signal on success.
+    async fn switch_profile(
+        &mut self,
+        context: &zbus::SignalContext<'_>,
+        func: fn(&mut Vec<ProfileError>),
+        name: &str,
+    ) -> zbus::fdo::Result<()> {
+        let result = self
+            .0
+            .lock()
+            .await
+            .apply_profile(context, func, name)
+            .await
+            .map_err(zbus_error_from_display);
+
+        if result.is_ok() {
+            self.emit_active_profile_changed().await
+        }
+
+        result
+    }
+
     /// Acquire a read guard on the shared fan status, mapping poison errors
     /// to a D-Bus fault so handlers can `?` out uniformly.
     fn read_status(&self) -> zbus::fdo::Result<std::sync::RwLockReadGuard<'_, FanStatus>> {
@@ -189,57 +211,21 @@ impl PowerService {
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
-        let result = self
-            .0
-            .lock()
-            .await
-            .apply_profile(&context, quiet, "Quiet")
-            .await
-            .map_err(zbus_error_from_display);
-
-        if result.is_ok() {
-            self.emit_active_profile_changed().await
-        }
-
-        result
+        self.switch_profile(&context, quiet, "Quiet").await
     }
 
     async fn balanced(
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
-        let result = self
-            .0
-            .lock()
-            .await
-            .apply_profile(&context, balanced, "Balanced")
-            .await
-            .map_err(zbus_error_from_display);
-
-        if result.is_ok() {
-            self.emit_active_profile_changed().await
-        }
-
-        result
+        self.switch_profile(&context, balanced, "Balanced").await
     }
 
     async fn performance(
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
-        let result = self
-            .0
-            .lock()
-            .await
-            .apply_profile(&context, performance, "Performance")
-            .await
-            .map_err(zbus_error_from_display);
-
-        if result.is_ok() {
-            self.emit_active_profile_changed().await
-        }
-
-        result
+        self.switch_profile(&context, performance, "Performance").await
     }
 
     #[dbus_interface(out_args("profile"))]
