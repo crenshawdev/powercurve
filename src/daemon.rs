@@ -459,23 +459,10 @@ impl UPowerPowerProfiles {
 
     #[dbus_interface(property)]
     async fn profiles(&self) -> Vec<HashMap<&'static str, zvariant::Value<'_>>> {
-        vec![
-            {
-                let mut map = HashMap::new();
-                map.insert("Profile", zvariant::Value::Str(zvariant::Str::from("balanced")));
-                map
-            },
-            {
-                let mut map = HashMap::new();
-                map.insert("Profile", zvariant::Value::Str(zvariant::Str::from("performance")));
-                map
-            },
-            {
-                let mut map = HashMap::new();
-                map.insert("Profile", zvariant::Value::Str(zvariant::Str::from("power-saver")));
-                map
-            },
-        ]
+        ["balanced", "performance", "power-saver"]
+            .into_iter()
+            .map(|name| HashMap::from([("Profile", zvariant::Value::Str(name.into()))]))
+            .collect()
     }
 
     #[dbus_interface(property)]
