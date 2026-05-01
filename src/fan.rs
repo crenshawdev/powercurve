@@ -447,14 +447,8 @@ impl FanDaemon {
             .iter()
             .filter_map(|sensor| sensor.temp(1).ok())
             .filter_map(|temp| temp.input().ok())
-            .fold(None, |best, val| {
-                if best.is_none_or(|b| val > b) {
-                    log::debug!("highest cpu temp: {val}");
-                    Some(val)
-                } else {
-                    best
-                }
-            })
+            .max()
+            .inspect(|t| log::debug!("highest cpu temp: {t}"))
     }
 
     /// Max temperature across GPU sensors (amdgpu hwmon + NVML), in millidegrees Celsius.
@@ -464,14 +458,8 @@ impl FanDaemon {
             .iter()
             .filter_map(|sensor| sensor.temp(1).ok())
             .filter_map(|temp| temp.input().ok())
-            .fold(None, |best, val| {
-                if best.is_none_or(|b| val > b) {
-                    log::debug!("highest amdgpu temp: {val}");
-                    Some(val)
-                } else {
-                    best
-                }
-            });
+            .max()
+            .inspect(|t| log::debug!("highest amdgpu temp: {t}"));
 
         match self.nvidia {
             NvidiaState::Absent => {}
@@ -500,12 +488,7 @@ impl FanDaemon {
             TempSource::All => {
                 let cpu = self.get_cpu_temp();
                 let gpu = self.get_gpu_temp();
-                match (cpu, gpu) {
-                    (Some(c), Some(g)) => Some(cmp::max(c, g)),
-                    (Some(c), None) => Some(c),
-                    (None, Some(g)) => Some(g),
-                    (None, None) => None,
-                }
+                cpu.into_iter().chain(gpu).max()
             }
         }
     }
