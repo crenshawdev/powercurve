@@ -11,6 +11,17 @@ pub const VALID_PROFILES: &[&str] = &["quiet", "balanced", "performance"];
 /// Canonical list of valid temperature source names for fan channels.
 pub const VALID_SOURCES: &[&str] = &["cpu", "gpu", "all"];
 
+/// True if `name` is a recognised power profile (case-insensitive).
+pub fn is_valid_profile(name: &str) -> bool {
+    VALID_PROFILES.contains(&name.to_lowercase().as_str())
+}
+
+/// True if `name` is a recognised temperature source (case-sensitive).
+/// Sources are written in lowercase in fan.toml and never normalised.
+pub fn is_valid_source(name: &str) -> bool {
+    VALID_SOURCES.contains(&name)
+}
+
 /// Severity level for config validation results.
 #[derive(PartialEq)]
 pub(crate) enum Severity {
@@ -169,7 +180,7 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             continue;
         }
 
-        if !VALID_SOURCES.contains(&ch.source.as_str()) {
+        if !is_valid_source(&ch.source) {
             issues.push(Issue::warning(format!(
                 "channel {} ({}): unknown source '{}', will default to 'all'",
                 i, ch.pwm, ch.source,
@@ -201,7 +212,7 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
 
         if let Some(ref profiles) = ch.profiles {
             for (name, profile) in profiles {
-                if !VALID_PROFILES.contains(&name.to_lowercase().as_str()) {
+                if !is_valid_profile(name) {
                     issues.push(Issue::warning(format!(
                         "channel {} ({}) profile '{}': unknown profile name",
                         i, ch.pwm, name,
@@ -220,7 +231,7 @@ fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
     let Some(ref profiles) = config.profiles else { return };
 
     for (name, profile) in profiles {
-        if !VALID_PROFILES.contains(&name.to_lowercase().as_str()) {
+        if !is_valid_profile(name) {
             issues.push(Issue::warning(format!(
                 "profile '{name}': unknown profile name, expected one of: {}",
                 VALID_PROFILES.join(", "),

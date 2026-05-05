@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::config_check::VALID_PROFILES;
+use crate::config_check::{VALID_PROFILES, is_valid_profile};
 use anyhow::Context;
 use log::LevelFilter;
 use powercurve_zbus::PowerCurveProxy;
@@ -75,21 +75,19 @@ struct CompiledRule {
 
 /// Parse and validate the config, compiling all match patterns up front.
 fn compile_rules(config: WatcherConfig) -> anyhow::Result<(WatcherSettings, Vec<CompiledRule>)> {
-    if let Some(ref dp) = config.watcher.default_profile {
-        let lower = dp.to_lowercase();
-        if !VALID_PROFILES.contains(&lower.as_str()) {
-            anyhow::bail!(
-                "invalid default_profile '{dp}', expected one of: {}",
-                VALID_PROFILES.join(", "),
-            );
-        }
+    if let Some(ref dp) = config.watcher.default_profile
+        && !is_valid_profile(dp)
+    {
+        anyhow::bail!(
+            "invalid default_profile '{dp}', expected one of: {}",
+            VALID_PROFILES.join(", "),
+        );
     }
 
     let mut rules = Vec::with_capacity(config.rule.len());
 
     for def in config.rule {
-        let lower = def.profile.to_lowercase();
-        if !VALID_PROFILES.contains(&lower.as_str()) {
+        if !is_valid_profile(&def.profile) {
             anyhow::bail!(
                 "rule '{}': invalid profile '{}', expected one of: {}",
                 def.name,
@@ -117,7 +115,7 @@ fn compile_rules(config: WatcherConfig) -> anyhow::Result<(WatcherSettings, Vec<
             }
         };
 
-        rules.push(CompiledRule { name: def.name, matcher, profile: lower });
+        rules.push(CompiledRule { name: def.name, matcher, profile: def.profile.to_lowercase() });
     }
 
     Ok((config.watcher, rules))
