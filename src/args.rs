@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::config_check::VALID_PROFILES;
 use clap::{Parser, builder::PossibleValuesParser};
 
 /// Top-level CLI for the `powercurve` binary.
@@ -52,7 +53,7 @@ pub enum Args {
         #[clap(
             help = "set the power profile",
             default_value = None,
-            value_parser = PossibleValuesParser::new(["quiet", "balanced", "performance"]),
+            value_parser = PossibleValuesParser::new(VALID_PROFILES),
         )]
         profile: Option<String>,
     },
