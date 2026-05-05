@@ -4,6 +4,13 @@ use crate::fan::{self, CONFIG_PATH, FanConfig};
 use std::fs;
 use sysfs_class::{HwMon, SysClass};
 
+/// Canonical list of valid power profile names. Lowercase to match the
+/// case normalisation done in `FanDaemon::set_profile`.
+pub const VALID_PROFILES: &[&str] = &["quiet", "balanced", "performance"];
+
+/// Canonical list of valid temperature source names for fan channels.
+pub const VALID_SOURCES: &[&str] = &["cpu", "gpu", "all"];
+
 /// Severity level for config validation results.
 #[derive(PartialEq)]
 pub(crate) enum Severity {
@@ -162,8 +169,7 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             continue;
         }
 
-        let valid_sources = ["cpu", "gpu", "all"];
-        if !valid_sources.contains(&ch.source.as_str()) {
+        if !VALID_SOURCES.contains(&ch.source.as_str()) {
             issues.push(Issue::warning(format!(
                 "channel {} ({}): unknown source '{}', will default to 'all'",
                 i, ch.pwm, ch.source,
@@ -194,9 +200,8 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
         }
 
         if let Some(ref profiles) = ch.profiles {
-            let valid_names = ["quiet", "balanced", "performance"];
             for (name, profile) in profiles {
-                if !valid_names.contains(&name.to_lowercase().as_str()) {
+                if !VALID_PROFILES.contains(&name.to_lowercase().as_str()) {
                     issues.push(Issue::warning(format!(
                         "channel {} ({}) profile '{}': unknown profile name",
                         i, ch.pwm, name,
@@ -214,11 +219,11 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
 fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
     let Some(ref profiles) = config.profiles else { return };
 
-    let valid_names = ["quiet", "balanced", "performance"];
     for (name, profile) in profiles {
-        if !valid_names.contains(&name.to_lowercase().as_str()) {
+        if !VALID_PROFILES.contains(&name.to_lowercase().as_str()) {
             issues.push(Issue::warning(format!(
-                "profile '{name}': unknown profile name, expected one of: quiet, balanced, performance",
+                "profile '{name}': unknown profile name, expected one of: {}",
+                VALID_PROFILES.join(", "),
             )));
         }
 
