@@ -601,10 +601,7 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     let mut profile_rx = profile_rx;
     let main_loop = async move {
-        let mut fallback_active = false;
-        let mut fallback_pending = false;
-        let mut original_profile: Option<String> = None;
-        let mut cool_ticks: u32 = 0;
+        let mut fallback = ThermalFallback::default();
         let mut stall_signalled: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 
@@ -616,31 +613,22 @@ pub async fn daemon() -> anyhow::Result<()> {
             }
 
             // Read these each iteration so hot-reloaded configs take effect.
-            let thermal_fallback = fan_daemon.thermal_fallback_enabled();
+            let thermal_fallback_enabled = fan_daemon.thermal_fallback_enabled();
             let thermal_cooldown = fan_daemon.thermal_cooldown_secs();
 
             if profile_rx.has_changed().unwrap_or(false) {
                 let profile = profile_rx.borrow_and_update().clone();
                 if !profile.is_empty() {
                     fan_daemon.set_profile(&profile);
-                    if fallback_pending {
-                        // This profile change came from the thermal fallback
-                        // code below, not from the user. Don't reset state.
-                        fallback_pending = false;
-                    } else if fallback_active {
-                        log::info!("manual profile change during thermal fallback, resetting");
-                        fallback_active = false;
-                        original_profile = None;
-                        cool_ticks = 0;
-                    }
+                    fallback.observe_profile_change();
                 }
             }
 
             let critical = fan_daemon.step();
             let _ = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]);
 
-            if thermal_fallback {
-                if critical && !fallback_active {
+            if thermal_fallback_enabled {
+                if critical && !fallback.active {
                     let current = thermal_service.0.lock().await.power_profile.clone();
                     let next = match current.as_str() {
                         "Performance" => Some("Balanced"),
@@ -649,10 +637,7 @@ pub async fn daemon() -> anyhow::Result<()> {
                     };
                     if let Some(target) = next {
                         log::warn!("thermal fallback: {current} -> {target}");
-                        original_profile.get_or_insert(current);
-                        fallback_active = true;
-                        fallback_pending = true;
-                        cool_ticks = 0;
+                        fallback.arm(current);
 
                         let temp = fan_daemon
                             .status_handle()
@@ -674,36 +659,17 @@ pub async fn daemon() -> anyhow::Result<()> {
                         )
                         .await;
                     }
-                } else if fallback_active && !critical {
-                    cool_ticks += 1;
-                    if cool_ticks >= thermal_cooldown {
-                        if let Some(ref orig) = original_profile {
-                            log::info!("thermal recovery: restoring profile {orig}");
-                            fallback_pending = true;
-                            let _ = match orig.as_str() {
-                                "Performance" => {
-                                    thermal_service.performance(thermal_context.clone()).await
-                                }
-                                "Balanced" => {
-                                    thermal_service.balanced(thermal_context.clone()).await
-                                }
-                                _ => thermal_service.quiet(thermal_context.clone()).await,
-                            };
+                } else if let Some(orig) = fallback.tick(critical, thermal_cooldown) {
+                    log::info!("thermal recovery: restoring profile {orig}");
+                    fallback.arm_recovery();
+                    let _ = match orig.as_str() {
+                        "Performance" => thermal_service.performance(thermal_context.clone()).await,
+                        "Balanced" => thermal_service.balanced(thermal_context.clone()).await,
+                        _ => thermal_service.quiet(thermal_context.clone()).await,
+                    };
 
-                            let _ = PowerService::thermal_event(
-                                &thermal_context,
-                                "fallback_up",
-                                0,
-                                orig,
-                            )
-                            .await;
-                        }
-                        fallback_active = false;
-                        original_profile = None;
-                        cool_ticks = 0;
-                    }
-                } else if critical {
-                    cool_ticks = 0;
+                    let _ = PowerService::thermal_event(&thermal_context, "fallback_up", 0, &orig)
+                        .await;
                 }
             }
 
@@ -741,6 +707,81 @@ pub async fn daemon() -> anyhow::Result<()> {
 
     log::info!("daemon exited from loop");
     Ok(())
+}
+
+/// Tracks the daemon's thermal fallback state machine: whether we have
+/// stepped a profile down to recover from a critical temperature, what the
+/// original profile was, and how many ticks we've been cooling off.
+#[derive(Default)]
+struct ThermalFallback {
+    /// True after we step a profile down and until the cooldown completes.
+    active: bool,
+    /// True between the moment we kick off our own profile change and the
+    /// `profile_rx` event that confirms it. Lets us tell our own changes
+    /// apart from the user manually switching profiles mid-fallback.
+    pending: bool,
+    /// Profile we stepped down from, restored on cooldown completion.
+    original_profile: Option<String>,
+    /// Consecutive non-critical ticks since cooldown started.
+    cool_ticks: u32,
+}
+
+impl ThermalFallback {
+    /// React to a `profile_rx` event. Consumes the pending flag if the
+    /// change came from us; otherwise treats it as a manual override and
+    /// resets fallback state.
+    fn observe_profile_change(&mut self) {
+        if self.pending {
+            self.pending = false;
+        } else if self.active {
+            log::info!("manual profile change during thermal fallback, resetting");
+            self.reset();
+        }
+    }
+
+    /// Mark a new fallback step-down. Records the original profile only on
+    /// the first call (subsequent step-downs preserve the user's true
+    /// starting profile).
+    fn arm(&mut self, original: String) {
+        self.original_profile.get_or_insert(original);
+        self.active = true;
+        self.pending = true;
+        self.cool_ticks = 0;
+    }
+
+    /// Mark the next `profile_rx` event as one we kicked off ourselves.
+    /// Used during recovery to keep `observe_profile_change` from treating
+    /// our own restore as a manual override.
+    fn arm_recovery(&mut self) {
+        self.pending = true;
+    }
+
+    /// Tick the cooldown counter. Returns `Some(profile_to_restore)` when
+    /// the cooldown completes and the caller should switch back. Resets
+    /// active state in the same call.
+    fn tick(&mut self, critical: bool, cooldown_secs: u32) -> Option<String> {
+        if critical {
+            self.cool_ticks = 0;
+            return None;
+        }
+        if !self.active {
+            return None;
+        }
+        self.cool_ticks += 1;
+        if self.cool_ticks < cooldown_secs {
+            return None;
+        }
+        let orig = self.original_profile.take();
+        self.active = false;
+        self.cool_ticks = 0;
+        orig
+    }
+
+    fn reset(&mut self) {
+        self.active = false;
+        self.original_profile = None;
+        self.cool_ticks = 0;
+    }
 }
 
 fn profile_to_upp_str(system76_profile: &str) -> &'static str {

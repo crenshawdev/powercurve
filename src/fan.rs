@@ -182,6 +182,13 @@ pub struct FanDaemon {
 
 const DEFAULT_HYSTERESIS_C: f32 = 3.0;
 
+/// Per-channel duty cycle (0-255) reported back from a step. `None` means
+/// the channel is in passthrough mode and was not touched.
+type ChannelDuties = Vec<(String, Option<u8>)>;
+
+/// Per-channel last-read fan RPM. `None` means the sensor was not read.
+type ChannelRpms = Vec<(String, Option<u32>)>;
+
 impl FanDaemon {
     /// Build a new fan daemon with per-channel temperature routing.
     ///
@@ -533,155 +540,157 @@ impl FanDaemon {
             return false;
         }
 
-        if self.discover().is_ok() {
-            let cpu_temp = self.get_cpu_temp();
-            let gpu_temp = self.get_gpu_temp();
-            let critical = cpu_temp.is_some_and(|t| t >= self.critical_cpu_temp)
-                || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
-
-            let mut duties = Vec::new();
-            let mut rpms = Vec::new();
-            let mut stalled = Vec::new();
-
-            if critical {
-                log::warn!("critical temp reached, all fans to max");
-                for channel in &self.channels {
-                    if channel.passthrough {
-                        duties.push((channel.pwm.clone(), None));
-                        rpms.push((channel.pwm.clone(), None));
-                        continue;
-                    }
-                    self.set_channel_duty(&channel.pwm, Some(255));
-                    duties.push((channel.pwm.clone(), Some(255)));
-                    rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
-                }
-                self.stall_counts.fill(0);
-            } else {
-                for (i, channel) in self.channels.iter().enumerate() {
-                    // Passthrough channels are left under BIOS/firmware control.
-                    if channel.passthrough {
-                        duties.push((channel.pwm.clone(), None));
-                        rpms.push((channel.pwm.clone(), None));
-                        continue;
-                    }
-
-                    // Temporary override bypasses curve evaluation entirely.
-                    let override_duty = self
-                        .status
-                        .read()
-                        .ok()
-                        .and_then(|s| s.overrides.get(&channel.pwm).copied());
-                    if let Some(duty) = override_duty {
-                        self.set_channel_duty(&channel.pwm, Some(duty));
-                        duties.push((channel.pwm.clone(), Some(duty)));
-                        rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
-                        self.stall_counts[i] = 0;
-                        continue;
-                    }
-
-                    let temp = self.get_temp_for(channel.source);
-                    let curve_duty = temp.and_then(|t| duty_from_curve(&channel.curve, t));
-
-                    let effective_duty = match (curve_duty, temp) {
-                        (Some(new_duty), Some(current_temp)) => {
-                            let last = self.last_duties[i];
-                            if new_duty >= last {
-                                self.last_duties[i] = new_duty;
-                                self.last_temps[i] = Some(current_temp);
-                                Some(new_duty)
-                            } else if let Some(lt) = self.last_temps[i] {
-                                if lt.saturating_sub(current_temp) >= self.hysteresis {
-                                    self.last_duties[i] = new_duty;
-                                    self.last_temps[i] = Some(current_temp);
-                                    Some(new_duty)
-                                } else {
-                                    Some(last)
-                                }
-                            } else {
-                                self.last_duties[i] = new_duty;
-                                self.last_temps[i] = Some(current_temp);
-                                Some(new_duty)
-                            }
-                        }
-                        (duty, _) => duty,
-                    };
-
-                    // Apply minimum duty floor if configured.
-                    let floored_duty = match (effective_duty, channel.min_duty) {
-                        (Some(d), Some(floor)) => Some(d.max(floor)),
-                        (None, Some(floor)) => Some(floor),
-                        (duty, None) => duty,
-                    };
-
-                    // Stall detection: if duty > 0 but RPM reads 0, the fan
-                    // may have stalled. Bump to floor or fallback after
-                    // consecutive zero-RPM reads exceed the threshold.
-                    let rpm =
-                        if channel.stall_detect { self.read_fan_rpm(&channel.pwm) } else { None };
-
-                    let final_duty = if channel.stall_detect {
-                        let is_spinning = floored_duty.is_some_and(|d| d > 0);
-                        let rpm_zero = rpm.is_some_and(|r| r == 0);
-
-                        if is_spinning && rpm_zero {
-                            self.stall_counts[i] += 1;
-                            if self.stall_counts[i] >= channel.stall_threshold {
-                                let bump = channel.min_duty.unwrap_or(Self::STALL_FALLBACK_DUTY);
-                                log::warn!(
-                                    "{}: fan stalled (0 RPM with duty > 0), bumping to {}",
-                                    channel.pwm,
-                                    bump
-                                );
-                                stalled.push(channel.pwm.clone());
-                                Some(floored_duty.map_or(bump, |d| d.max(bump)))
-                            } else {
-                                floored_duty
-                            }
-                        } else {
-                            self.stall_counts[i] = 0;
-                            floored_duty
-                        }
-                    } else {
-                        floored_duty
-                    };
-
-                    self.set_channel_duty(&channel.pwm, final_duty);
-                    duties.push((channel.pwm.clone(), final_duty));
-                    rpms.push((channel.pwm.clone(), rpm));
-                }
-            }
-
-            if let Ok(mut s) = self.status.write() {
-                s.cpu_temp = cpu_temp;
-                s.gpu_temp = gpu_temp;
-                s.channel_duties = duties;
-                s.channel_curves = self
-                    .channels
-                    .iter()
-                    .filter(|ch| !ch.passthrough)
-                    .map(|ch| (ch.pwm.clone(), ch.curve.to_display_points()))
-                    .collect();
-                s.min_duties = self
-                    .channels
-                    .iter()
-                    .filter(|ch| !ch.passthrough)
-                    .map(|ch| (ch.pwm.clone(), ch.min_duty))
-                    .collect();
-                s.rpms = rpms;
-                s.stalled = stalled;
-                s.passthrough = self
-                    .channels
-                    .iter()
-                    .filter(|ch| ch.passthrough)
-                    .map(|ch| ch.pwm.clone())
-                    .collect();
-                s.critical = critical;
-            }
-
-            return critical;
+        if self.discover().is_err() {
+            return false;
         }
 
-        false
+        let cpu_temp = self.get_cpu_temp();
+        let gpu_temp = self.get_gpu_temp();
+        let critical = cpu_temp.is_some_and(|t| t >= self.critical_cpu_temp)
+            || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
+
+        let (duties, rpms, stalled) = if critical {
+            log::warn!("critical temp reached, all fans to max");
+            let (duties, rpms) = self.force_max_duties();
+            (duties, rpms, Vec::new())
+        } else {
+            self.step_channels()
+        };
+
+        self.write_status(cpu_temp, gpu_temp, duties, rpms, stalled, critical);
+
+        critical
+    }
+
+    /// Drive every non-passthrough channel to full duty. Used when any source
+    /// crosses its critical threshold.
+    fn force_max_duties(&mut self) -> (ChannelDuties, ChannelRpms) {
+        let mut duties = Vec::with_capacity(self.channels.len());
+        let mut rpms = Vec::with_capacity(self.channels.len());
+        for channel in &self.channels {
+            if channel.passthrough {
+                duties.push((channel.pwm.clone(), None));
+                rpms.push((channel.pwm.clone(), None));
+                continue;
+            }
+            self.set_channel_duty(&channel.pwm, Some(255));
+            duties.push((channel.pwm.clone(), Some(255)));
+            rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
+        }
+        self.stall_counts.fill(0);
+        (duties, rpms)
+    }
+
+    /// Evaluate every channel under normal (non-critical) conditions and
+    /// apply the resulting duties. Returns `(duties, rpms, stalled_pwms)`.
+    fn step_channels(&mut self) -> (ChannelDuties, ChannelRpms, Vec<String>) {
+        let mut duties = Vec::with_capacity(self.channels.len());
+        let mut rpms = Vec::with_capacity(self.channels.len());
+        let mut stalled = Vec::new();
+
+        for i in 0..self.channels.len() {
+            let pwm = self.channels[i].pwm.clone();
+            let source = self.channels[i].source;
+            let min_duty = self.channels[i].min_duty;
+            let stall_detect = self.channels[i].stall_detect;
+            let stall_threshold = self.channels[i].stall_threshold;
+            let passthrough = self.channels[i].passthrough;
+
+            if passthrough {
+                duties.push((pwm.clone(), None));
+                rpms.push((pwm, None));
+                continue;
+            }
+
+            let override_duty =
+                self.status.read().ok().and_then(|s| s.overrides.get(&pwm).copied());
+            if let Some(duty) = override_duty {
+                self.set_channel_duty(&pwm, Some(duty));
+                let rpm = self.read_fan_rpm(&pwm);
+                duties.push((pwm.clone(), Some(duty)));
+                rpms.push((pwm, rpm));
+                self.stall_counts[i] = 0;
+                continue;
+            }
+
+            let temp = self.get_temp_for(source);
+            let curve_duty = temp.and_then(|t| duty_from_curve(&self.channels[i].curve, t));
+
+            let (effective_duty, hysteresis_update) = apply_hysteresis(
+                curve_duty,
+                temp,
+                self.last_duties[i],
+                self.last_temps[i],
+                self.hysteresis,
+            );
+            if let Some((new_last_duty, new_last_temp)) = hysteresis_update {
+                self.last_duties[i] = new_last_duty;
+                self.last_temps[i] = new_last_temp;
+            }
+
+            let floored_duty = apply_min_duty_floor(effective_duty, min_duty);
+
+            let rpm = if stall_detect { self.read_fan_rpm(&pwm) } else { None };
+
+            let final_duty = if stall_detect {
+                let result = evaluate_stall(
+                    floored_duty,
+                    rpm,
+                    self.stall_counts[i],
+                    stall_threshold,
+                    min_duty,
+                    Self::STALL_FALLBACK_DUTY,
+                );
+                self.stall_counts[i] = result.new_stall_count;
+                if let Some(bump) = result.bumped_to {
+                    log::warn!("{pwm}: fan stalled (0 RPM with duty > 0), bumping to {bump}");
+                    stalled.push(pwm.clone());
+                }
+                result.final_duty
+            } else {
+                floored_duty
+            };
+
+            self.set_channel_duty(&pwm, final_duty);
+            duties.push((pwm.clone(), final_duty));
+            rpms.push((pwm, rpm));
+        }
+
+        (duties, rpms, stalled)
+    }
+
+    /// Publish the current step's results to the shared status snapshot.
+    fn write_status(
+        &self,
+        cpu_temp: Option<u32>,
+        gpu_temp: Option<u32>,
+        duties: ChannelDuties,
+        rpms: ChannelRpms,
+        stalled: Vec<String>,
+        critical: bool,
+    ) {
+        if let Ok(mut s) = self.status.write() {
+            s.cpu_temp = cpu_temp;
+            s.gpu_temp = gpu_temp;
+            s.channel_duties = duties;
+            s.channel_curves = self
+                .channels
+                .iter()
+                .filter(|ch| !ch.passthrough)
+                .map(|ch| (ch.pwm.clone(), ch.curve.to_display_points()))
+                .collect();
+            s.min_duties = self
+                .channels
+                .iter()
+                .filter(|ch| !ch.passthrough)
+                .map(|ch| (ch.pwm.clone(), ch.min_duty))
+                .collect();
+            s.rpms = rpms;
+            s.stalled = stalled;
+            s.passthrough =
+                self.channels.iter().filter(|ch| ch.passthrough).map(|ch| ch.pwm.clone()).collect();
+            s.critical = critical;
+        }
     }
 
     /// Whether thermal fallback is enabled in the config.
@@ -714,6 +723,85 @@ fn duty_from_curve(curve: &FanCurve, temp_millideg: u32) -> Option<u8> {
     curve
         .get_duty((temp_millideg / 10) as i16)
         .map(|duty| (((u32::from(duty)) * 255) / 10_000) as u8)
+}
+
+/// Apply hysteresis to a curve-derived duty so the fan only spins down when
+/// the temperature has dropped by at least `hysteresis` millidegrees from
+/// the last point at which we changed duty.
+///
+/// Returns `(effective_duty, state_update)` where `state_update` is `Some`
+/// when the caller should write back new last-duty and last-temp values.
+fn apply_hysteresis(
+    curve_duty: Option<u8>,
+    temp: Option<u32>,
+    last_duty: u8,
+    last_temp: Option<u32>,
+    hysteresis: u32,
+) -> (Option<u8>, Option<(u8, Option<u32>)>) {
+    let (Some(new_duty), Some(current_temp)) = (curve_duty, temp) else {
+        return (curve_duty, None);
+    };
+
+    if new_duty >= last_duty {
+        return (Some(new_duty), Some((new_duty, Some(current_temp))));
+    }
+
+    let cooled_enough = last_temp.is_some_and(|lt| lt.saturating_sub(current_temp) >= hysteresis);
+    if cooled_enough || last_temp.is_none() {
+        (Some(new_duty), Some((new_duty, Some(current_temp))))
+    } else {
+        (Some(last_duty), None)
+    }
+}
+
+/// Apply a minimum duty floor, preserving an explicit `None` request only
+/// when no floor is configured.
+fn apply_min_duty_floor(duty: Option<u8>, floor: Option<u8>) -> Option<u8> {
+    match (duty, floor) {
+        (Some(d), Some(f)) => Some(d.max(f)),
+        (None, Some(f)) => Some(f),
+        (duty, None) => duty,
+    }
+}
+
+/// Outcome of stall detection for a single channel.
+struct StallResult {
+    final_duty: Option<u8>,
+    new_stall_count: u32,
+    /// `Some(bump_to)` when the stall threshold was just exceeded and the
+    /// caller should log a warning and flag the channel as stalled.
+    bumped_to: Option<u8>,
+}
+
+/// Detect a stalled fan and bump duty if a channel has been spinning
+/// against zero RPM for `threshold` consecutive samples.
+fn evaluate_stall(
+    floored_duty: Option<u8>,
+    rpm: Option<u32>,
+    stall_count: u32,
+    threshold: u32,
+    min_duty: Option<u8>,
+    fallback_duty: u8,
+) -> StallResult {
+    let is_spinning = floored_duty.is_some_and(|d| d > 0);
+    let rpm_zero = rpm.is_some_and(|r| r == 0);
+
+    if !(is_spinning && rpm_zero) {
+        return StallResult { final_duty: floored_duty, new_stall_count: 0, bumped_to: None };
+    }
+
+    let new_count = stall_count + 1;
+    if new_count < threshold {
+        return StallResult {
+            final_duty: floored_duty,
+            new_stall_count: new_count,
+            bumped_to: None,
+        };
+    }
+
+    let bump = min_duty.unwrap_or(fallback_duty);
+    let final_duty = Some(floored_duty.map_or(bump, |d| d.max(bump)));
+    StallResult { final_duty, new_stall_count: new_count, bumped_to: Some(bump) }
 }
 
 /// Try to load and parse the TOML config file. Returns None if the file
@@ -1388,5 +1476,109 @@ mod tests {
         let config: FanConfig = toml::from_str(toml_str).unwrap();
         assert!(!config.channels.is_empty());
         assert!(config.profiles.is_some());
+    }
+
+    #[test]
+    fn hysteresis_rises_immediately() {
+        let (duty, update) = apply_hysteresis(Some(120), Some(55_000), 80, Some(50_000), 3_000);
+        assert_eq!(duty, Some(120));
+        assert_eq!(update, Some((120, Some(55_000))));
+    }
+
+    #[test]
+    fn hysteresis_holds_when_not_cooled_enough() {
+        let (duty, update) = apply_hysteresis(Some(40), Some(54_000), 80, Some(55_000), 3_000);
+        assert_eq!(duty, Some(80));
+        assert!(update.is_none());
+    }
+
+    #[test]
+    fn hysteresis_drops_when_cooled_enough() {
+        let (duty, update) = apply_hysteresis(Some(40), Some(50_000), 80, Some(55_000), 3_000);
+        assert_eq!(duty, Some(40));
+        assert_eq!(update, Some((40, Some(50_000))));
+    }
+
+    #[test]
+    fn hysteresis_initialises_with_no_prior_temp() {
+        let (duty, update) = apply_hysteresis(Some(40), Some(45_000), 80, None, 3_000);
+        assert_eq!(duty, Some(40));
+        assert_eq!(update, Some((40, Some(45_000))));
+    }
+
+    #[test]
+    fn hysteresis_passes_curve_duty_through_when_no_temp() {
+        let (duty, update) = apply_hysteresis(None, Some(55_000), 80, Some(50_000), 3_000);
+        assert_eq!(duty, None);
+        assert!(update.is_none());
+    }
+
+    #[test]
+    fn min_duty_floor_raises_below_floor() {
+        assert_eq!(apply_min_duty_floor(Some(20), Some(50)), Some(50));
+    }
+
+    #[test]
+    fn min_duty_floor_passes_through_above_floor() {
+        assert_eq!(apply_min_duty_floor(Some(80), Some(50)), Some(80));
+    }
+
+    #[test]
+    fn min_duty_floor_uses_floor_when_duty_absent() {
+        assert_eq!(apply_min_duty_floor(None, Some(50)), Some(50));
+    }
+
+    #[test]
+    fn min_duty_floor_passes_through_with_no_floor() {
+        assert_eq!(apply_min_duty_floor(Some(80), None), Some(80));
+        assert_eq!(apply_min_duty_floor(None, None), None);
+    }
+
+    #[test]
+    fn stall_resets_count_when_spinning_normally() {
+        let r = evaluate_stall(Some(120), Some(800), 2, 3, None, 38);
+        assert_eq!(r.final_duty, Some(120));
+        assert_eq!(r.new_stall_count, 0);
+        assert!(r.bumped_to.is_none());
+    }
+
+    #[test]
+    fn stall_increments_below_threshold() {
+        let r = evaluate_stall(Some(120), Some(0), 1, 3, None, 38);
+        assert_eq!(r.final_duty, Some(120));
+        assert_eq!(r.new_stall_count, 2);
+        assert!(r.bumped_to.is_none());
+    }
+
+    #[test]
+    fn stall_bumps_at_threshold_using_min_duty() {
+        let r = evaluate_stall(Some(80), Some(0), 2, 3, Some(150), 38);
+        assert_eq!(r.final_duty, Some(150));
+        assert_eq!(r.new_stall_count, 3);
+        assert_eq!(r.bumped_to, Some(150));
+    }
+
+    #[test]
+    fn stall_bumps_at_threshold_using_fallback() {
+        let r = evaluate_stall(Some(20), Some(0), 2, 3, None, 38);
+        assert_eq!(r.final_duty, Some(38));
+        assert_eq!(r.new_stall_count, 3);
+        assert_eq!(r.bumped_to, Some(38));
+    }
+
+    #[test]
+    fn stall_keeps_higher_existing_duty_when_bumping() {
+        let r = evaluate_stall(Some(200), Some(0), 2, 3, Some(150), 38);
+        assert_eq!(r.final_duty, Some(200));
+        assert_eq!(r.new_stall_count, 3);
+        assert_eq!(r.bumped_to, Some(150));
+    }
+
+    #[test]
+    fn stall_inactive_when_duty_is_none() {
+        let r = evaluate_stall(None, Some(0), 2, 3, None, 38);
+        assert_eq!(r.final_duty, None);
+        assert_eq!(r.new_stall_count, 0);
+        assert!(r.bumped_to.is_none());
     }
 }
