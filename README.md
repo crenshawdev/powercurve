@@ -244,6 +244,11 @@ Each channel's `source` field controls which sensors drive it:
 If NVIDIA hardware is detected but NVML can't load, GPU-sourced
 channels run at max duty as a safety measure.
 
+If a temperature source returns no reading on a given cycle (sensor
+disconnect, transient sysfs hiccup), the affected channel holds its
+last duty rather than dropping. Persistent failures eventually trip
+the critical-temp safety net.
+
 ### Thermal protection
 
 When any sensor crosses its critical threshold, all fans immediately
@@ -445,7 +450,8 @@ powercurve config
 
 This checks curve monotonicity, duty ranges, critical temp bounds,
 hysteresis/cooldown values, profile names, per-channel profile curves,
-and whether the referenced hwmon devices exist on the current machine.
+whether the referenced hwmon devices exist on the current machine, and
+rejects curves that allow zero duty at or above the critical temperature.
 Errors prevent the daemon from loading the config, warnings are
 informational.
 

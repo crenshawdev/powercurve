@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 (2026-05-06)
+
+When a temperature source disappears mid-run, the daemon now holds the last
+known duty instead of dropping the channel. Lost a sensor read for one cycle?
+The fan keeps doing what it was doing. Lose it long enough that the
+critical-temp safety net trips? You still get max duty. The old behavior of
+sailing to zero on a missing read was a bug waiting to happen.
+
+Config validation now rejects `duty = 0` at or above the critical temperature.
+A curve that says "go quiet at 90C" is a misconfiguration, not a preference.
+The daemon refuses to load it. Existing configs without that pattern keep
+working untouched.
+
+Retry exhaustion and signal-handler failures now surface as real errors
+instead of being swallowed. If something gives up or a handler fails, you
+see it in the journal.
+
+The workspace moved to Rust edition 2024, the lockfile refreshed against
+current advisories, and toml and thiserror picked up their respective major
+version bumps. All internal, nothing for users to do.
+
 ## 0.2.1 (2026-04-15)
 
 Switched the systemd unit to Type=notify with a watchdog. systemd actually
