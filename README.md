@@ -33,10 +33,10 @@ software. See the LICENSE for full terms.
 
 ### Arch
 
-Available from the [VintageTechie Arch repo](https://vintagetechie.gitlab.io/vintagetechie-arch-repo/):
+Available on the [AUR](https://aur.archlinux.org/packages/powercurve-git):
 
 ```
-sudo pacman -S powercurve-git
+yay -S powercurve-git
 ```
 
 ### Debian / Ubuntu / Pop!_OS
