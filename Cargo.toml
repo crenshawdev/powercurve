@@ -2,7 +2,7 @@
 edition = "2024"
 rust-version = "1.93.0"
 name = "powercurve"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["John Crenshaw"]
 license = "GPL-3.0-only"
 description = "Lightweight desktop power management daemon with configurable fan curves"
