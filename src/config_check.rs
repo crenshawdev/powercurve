@@ -91,7 +91,8 @@ pub fn run() -> anyhow::Result<()> {
 pub(crate) fn validate(config: &FanConfig) -> Vec<Issue> {
     let mut issues = Vec::new();
 
-    validate_curve(&config.curve, "shared", &mut issues);
+    let shared_critical = config.critical_cpu_temp.min(config.critical_gpu_temp);
+    validate_curve(&config.curve, "shared", shared_critical, &mut issues);
     validate_critical_temps(config, &mut issues);
     validate_channels(config, &mut issues);
     validate_profiles(config, &mut issues);
@@ -100,8 +101,24 @@ pub(crate) fn validate(config: &FanConfig) -> Vec<Issue> {
     issues
 }
 
-/// Check that curve points have strictly increasing temps and sane duty values.
-fn validate_curve(points: &[fan::CurvePoint], label: &str, issues: &mut Vec<Issue>) {
+/// Critical temperature a curve must respect, given a channel source.
+/// Unknown sources fall back to the lower of the two — strictest wins.
+fn critical_for_source(source: &str, config: &FanConfig) -> f32 {
+    match source {
+        "cpu" => config.critical_cpu_temp,
+        "gpu" => config.critical_gpu_temp,
+        _ => config.critical_cpu_temp.min(config.critical_gpu_temp),
+    }
+}
+
+/// Check that curve points have strictly increasing temps and sane duty values,
+/// and that no point has zero duty at or above `critical_temp`.
+fn validate_curve(
+    points: &[fan::CurvePoint],
+    label: &str,
+    critical_temp: f32,
+    issues: &mut Vec<Issue>,
+) {
     if points.is_empty() {
         issues.push(Issue::error(format!("{label} curve has no points")));
         return;
@@ -122,6 +139,13 @@ fn validate_curve(points: &[fan::CurvePoint], label: &str, issues: &mut Vec<Issu
                 i,
                 point.temp,
                 points[i - 1].temp,
+            )));
+        }
+
+        if point.duty == 0.0 && point.temp >= critical_temp {
+            issues.push(Issue::error(format!(
+                "{} curve point {}: duty is 0 at {:.1}C, at or above critical {:.1}C",
+                label, i, point.temp, critical_temp,
             )));
         }
     }
@@ -205,9 +229,11 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
             )));
         }
 
+        let critical = critical_for_source(&ch.source, config);
+
         if let Some(ref curve) = ch.curve {
             let label = format!("channel {} ({})", i, ch.pwm);
-            validate_curve(curve, &label, issues);
+            validate_curve(curve, &label, critical, issues);
         }
 
         if let Some(ref profiles) = ch.profiles {
@@ -220,7 +246,7 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
                 }
 
                 let label = format!("channel {} ({}) profile '{}'", i, ch.pwm, name);
-                validate_curve(&profile.curve, &label, issues);
+                validate_curve(&profile.curve, &label, critical, issues);
             }
         }
     }
@@ -229,6 +255,8 @@ fn validate_channels(config: &FanConfig, issues: &mut Vec<Issue>) {
 /// Validate per-profile curve overrides.
 fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
     let Some(ref profiles) = config.profiles else { return };
+
+    let profile_critical = config.critical_cpu_temp.min(config.critical_gpu_temp);
 
     for (name, profile) in profiles {
         if !is_valid_profile(name) {
@@ -239,7 +267,7 @@ fn validate_profiles(config: &FanConfig, issues: &mut Vec<Issue>) {
         }
 
         let label = format!("profile '{name}'");
-        validate_curve(&profile.curve, &label, issues);
+        validate_curve(&profile.curve, &label, profile_critical, issues);
     }
 }
 
@@ -338,11 +366,16 @@ mod tests {
             .collect()
     }
 
+    /// Lowest critical for the shared/profile-curve case in tests.
+    fn shared_critical(config: &FanConfig) -> f32 {
+        config.critical_cpu_temp.min(config.critical_gpu_temp)
+    }
+
     #[test]
     fn valid_config_no_issues() {
         let config = valid_config();
         let mut issues = Vec::new();
-        validate_curve(&config.curve, "shared", &mut issues);
+        validate_curve(&config.curve, "shared", shared_critical(&config), &mut issues);
         validate_critical_temps(&config, &mut issues);
         validate_channels(&config, &mut issues);
         validate_profiles(&config, &mut issues);
@@ -356,7 +389,7 @@ mod tests {
         config.curve =
             vec![CurvePoint { temp: 50.0, duty: 50.0 }, CurvePoint { temp: 30.0, duty: 10.0 }];
         let mut issues = Vec::new();
-        validate_curve(&config.curve, "shared", &mut issues);
+        validate_curve(&config.curve, "shared", shared_critical(&config), &mut issues);
         assert_eq!(errors(&issues).len(), 1);
         assert!(errors(&issues)[0].contains("not greater than previous"));
     }
@@ -367,7 +400,7 @@ mod tests {
         config.curve =
             vec![CurvePoint { temp: 30.0, duty: -5.0 }, CurvePoint { temp: 50.0, duty: 110.0 }];
         let mut issues = Vec::new();
-        validate_curve(&config.curve, "shared", &mut issues);
+        validate_curve(&config.curve, "shared", shared_critical(&config), &mut issues);
         assert_eq!(errors(&issues).len(), 2);
     }
 
@@ -618,5 +651,80 @@ mod tests {
         validate_channels(&config, &mut issues);
         assert_eq!(warnings(&issues).len(), 1);
         assert!(warnings(&issues)[0].contains("passthrough"));
+    }
+
+    #[test]
+    fn zero_duty_at_critical_is_error() {
+        let curve =
+            vec![CurvePoint { temp: 30.0, duty: 10.0 }, CurvePoint { temp: 75.0, duty: 0.0 }];
+        let mut issues = Vec::new();
+        validate_curve(&curve, "shared", 75.0, &mut issues);
+        let errs = errors(&issues);
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].contains("critical"));
+    }
+
+    #[test]
+    fn zero_duty_below_critical_is_ok() {
+        let curve =
+            vec![CurvePoint { temp: 30.0, duty: 10.0 }, CurvePoint { temp: 70.0, duty: 0.0 }];
+        let mut issues = Vec::new();
+        validate_curve(&curve, "shared", 75.0, &mut issues);
+        assert!(errors(&issues).is_empty());
+    }
+
+    #[test]
+    fn channel_gpu_curve_zero_at_critical_is_error() {
+        // GPU critical is 75; zero duty at 75 must error.
+        let mut config = valid_config();
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "gpu".into(),
+            min_duty: None,
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: Some(vec![
+                CurvePoint { temp: 30.0, duty: 10.0 },
+                CurvePoint { temp: 75.0, duty: 0.0 },
+            ]),
+            profiles: None,
+        }];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert!(errors(&issues).iter().any(|e| e.contains("critical")));
+    }
+
+    #[test]
+    fn channel_cpu_curve_zero_below_cpu_critical_is_ok() {
+        // CPU critical is 80; zero duty at 76 is fine for cpu source.
+        let mut config = valid_config();
+        config.channels = vec![ChannelConfig {
+            pwm: "pwm1".into(),
+            source: "cpu".into(),
+            min_duty: None,
+            stall_detect: None,
+            stall_threshold: None,
+            passthrough: None,
+            curve: Some(vec![
+                CurvePoint { temp: 30.0, duty: 10.0 },
+                CurvePoint { temp: 76.0, duty: 0.0 },
+            ]),
+            profiles: None,
+        }];
+        let mut issues = Vec::new();
+        validate_channels(&config, &mut issues);
+        assert!(errors(&issues).is_empty());
+    }
+
+    #[test]
+    fn shared_curve_zero_at_hot_uses_min_critical() {
+        // Min critical is 75 (gpu). Zero duty at 76 must error via top-level validate.
+        let mut config = valid_config();
+        config.curve =
+            vec![CurvePoint { temp: 30.0, duty: 10.0 }, CurvePoint { temp: 76.0, duty: 0.0 }];
+        let mut issues = Vec::new();
+        validate_curve(&config.curve, "shared", shared_critical(&config), &mut issues);
+        assert!(errors(&issues).iter().any(|e| e.contains("critical")));
     }
 }
