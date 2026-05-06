@@ -169,6 +169,12 @@ pub struct FanDaemon {
     last_duties: Vec<u8>,
     last_temps: Vec<Option<u32>>,
     stall_counts: Vec<u32>,
+    /// Last raw duty actually committed to sysfs per channel. Held over a
+    /// missing-temp episode to refuse handing control back to the EC.
+    last_committed_duty: Vec<Option<u8>>,
+    /// Set when the last tick logged a missing-temp warning for this channel.
+    /// Cleared when temp returns, so the warn fires once per episode.
+    temp_missing_warned: Vec<bool>,
     platform_names: Vec<String>,
     amdgpus: Vec<HwMon>,
     platforms: Vec<HwMon>,
@@ -208,6 +214,8 @@ impl FanDaemon {
             last_duties: Vec::new(),
             last_temps: Vec::new(),
             stall_counts: Vec::new(),
+            last_committed_duty: Vec::new(),
+            temp_missing_warned: Vec::new(),
             platform_names: Vec::new(),
             amdgpus: Vec::new(),
             platforms: Vec::new(),
@@ -315,6 +323,8 @@ impl FanDaemon {
         self.last_duties = vec![0; count];
         self.last_temps = vec![None; count];
         self.stall_counts = vec![0; count];
+        self.last_committed_duty = vec![None; count];
+        self.temp_missing_warned = vec![false; count];
 
         if !self.platform_names.is_empty()
             && let Err(err) = self.discover()
@@ -407,6 +417,10 @@ impl FanDaemon {
         self.last_duties.fill(0);
         self.last_temps.fill(None);
         self.stall_counts.fill(0);
+        // A profile change is a meaningful event; let the next missing-temp
+        // episode log a fresh warning. Keep last_committed so the held-duty
+        // guardrail still has a value to fall back to.
+        self.temp_missing_warned.fill(false);
 
         // Clear any temporary fan overrides when the profile changes.
         if let Ok(mut s) = self.status.write() {
@@ -567,15 +581,19 @@ impl FanDaemon {
     fn force_max_duties(&mut self) -> (ChannelDuties, ChannelRpms) {
         let mut duties = Vec::with_capacity(self.channels.len());
         let mut rpms = Vec::with_capacity(self.channels.len());
-        for channel in &self.channels {
-            if channel.passthrough {
-                duties.push((channel.pwm.clone(), None));
-                rpms.push((channel.pwm.clone(), None));
+        for i in 0..self.channels.len() {
+            let pwm = self.channels[i].pwm.clone();
+            if self.channels[i].passthrough {
+                duties.push((pwm.clone(), None));
+                rpms.push((pwm, None));
                 continue;
             }
-            self.set_channel_duty(&channel.pwm, Some(255));
-            duties.push((channel.pwm.clone(), Some(255)));
-            rpms.push((channel.pwm.clone(), self.read_fan_rpm(&channel.pwm)));
+            self.set_channel_duty(&pwm, Some(255));
+            self.last_committed_duty[i] = Some(255);
+            self.temp_missing_warned[i] = false;
+            let rpm = self.read_fan_rpm(&pwm);
+            duties.push((pwm.clone(), Some(255)));
+            rpms.push((pwm, rpm));
         }
         self.stall_counts.fill(0);
         (duties, rpms)
@@ -610,6 +628,8 @@ impl FanDaemon {
                 duties.push((pwm.clone(), Some(duty)));
                 rpms.push((pwm, rpm));
                 self.stall_counts[i] = 0;
+                self.last_committed_duty[i] = Some(duty);
+                self.temp_missing_warned[i] = false;
                 continue;
             }
 
@@ -632,7 +652,7 @@ impl FanDaemon {
 
             let rpm = if stall_detect { self.read_fan_rpm(&pwm) } else { None };
 
-            let final_duty = if stall_detect {
+            let computed_duty = if stall_detect {
                 let result = evaluate_stall(
                     floored_duty,
                     rpm,
@@ -651,7 +671,27 @@ impl FanDaemon {
                 floored_duty
             };
 
+            let temp_missing = computed_duty.is_none();
+            let final_duty = resolve_safe_duty(
+                computed_duty,
+                self.last_committed_duty[i],
+                Self::STALL_FALLBACK_DUTY,
+            );
+            if temp_missing {
+                if !self.temp_missing_warned[i]
+                    && let Some(held) = final_duty
+                {
+                    log::warn!("{pwm}: temp source {source:?} unavailable, holding duty at {held}");
+                    self.temp_missing_warned[i] = true;
+                }
+            } else {
+                self.temp_missing_warned[i] = false;
+            }
+
             self.set_channel_duty(&pwm, final_duty);
+            if let Some(d) = final_duty {
+                self.last_committed_duty[i] = Some(d);
+            }
             duties.push((pwm.clone(), final_duty));
             rpms.push((pwm, rpm));
         }
@@ -762,6 +802,14 @@ fn apply_min_duty_floor(duty: Option<u8>, floor: Option<u8>) -> Option<u8> {
         (None, Some(f)) => Some(f),
         (duty, None) => duty,
     }
+}
+
+/// Resolve a safe duty when the curve pipeline produced `None` because the
+/// temp source was unavailable. Holding the last committed duty is strictly
+/// safer than letting `set_channel_duty` write `pwm_enable=2` and hand the
+/// channel back to the EC. With no prior commit, fall to `fallback`.
+fn resolve_safe_duty(computed: Option<u8>, last_committed: Option<u8>, fallback: u8) -> Option<u8> {
+    computed.or_else(|| Some(last_committed.unwrap_or(fallback)))
 }
 
 /// Outcome of stall detection for a single channel.
@@ -1580,5 +1628,25 @@ mod tests {
         assert_eq!(r.final_duty, None);
         assert_eq!(r.new_stall_count, 0);
         assert!(r.bumped_to.is_none());
+    }
+
+    #[test]
+    fn safe_duty_passes_through_some() {
+        assert_eq!(resolve_safe_duty(Some(80), Some(50), 38), Some(80));
+        assert_eq!(resolve_safe_duty(Some(80), None, 38), Some(80));
+        assert_eq!(resolve_safe_duty(Some(0), Some(50), 38), Some(0));
+    }
+
+    #[test]
+    fn safe_duty_holds_last_when_none_with_history() {
+        assert_eq!(resolve_safe_duty(None, Some(80), 38), Some(80));
+        assert_eq!(resolve_safe_duty(None, Some(255), 38), Some(255));
+        assert_eq!(resolve_safe_duty(None, Some(0), 38), Some(0));
+    }
+
+    #[test]
+    fn safe_duty_uses_fallback_when_none_no_history() {
+        assert_eq!(resolve_safe_duty(None, None, 38), Some(38));
+        assert_eq!(resolve_safe_duty(None, None, 100), Some(100));
     }
 }
