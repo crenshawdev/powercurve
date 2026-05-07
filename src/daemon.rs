@@ -211,6 +211,7 @@ impl PowerService {
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
+        log::debug!("dbus method Quiet called");
         self.switch_profile(&context, quiet, "Quiet").await
     }
 
@@ -218,6 +219,7 @@ impl PowerService {
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
+        log::debug!("dbus method Balanced called");
         self.switch_profile(&context, balanced, "Balanced").await
     }
 
@@ -225,6 +227,7 @@ impl PowerService {
         &mut self,
         #[zbus(signal_context)] context: zbus::SignalContext<'_>,
     ) -> zbus::fdo::Result<()> {
+        log::debug!("dbus method Performance called");
         self.switch_profile(&context, performance, "Performance").await
     }
 
@@ -285,6 +288,7 @@ impl PowerService {
     /// Temporarily override a fan channel's duty cycle. Lasts until the
     /// next profile change or until explicitly cleared.
     async fn set_fan_override(&self, channel: &str, duty_percent: u8) -> zbus::fdo::Result<()> {
+        log::debug!("dbus method SetFanOverride called");
         let duty_byte = ((duty_percent.min(100) as u16) * 255 / 100) as u8;
         let mut status = self.write_status()?;
         status.overrides.insert(channel.to_string(), duty_byte);
@@ -293,6 +297,7 @@ impl PowerService {
 
     /// Clear a temporary fan override, returning the channel to curve control.
     async fn clear_fan_override(&self, channel: &str) -> zbus::fdo::Result<()> {
+        log::debug!("dbus method ClearFanOverride called");
         let mut status = self.write_status()?;
         status.overrides.remove(channel);
         Ok(())
@@ -390,6 +395,7 @@ impl UPowerPowerProfiles {
         reason: &str,
         application_id: &str,
     ) -> zbus::fdo::Result<u32> {
+        log::debug!("dbus method HoldProfile called");
         let mut this = self.0.lock().await;
         let id = this.profile_ids;
 
@@ -410,6 +416,7 @@ impl UPowerPowerProfiles {
     }
 
     async fn release_profile(&mut self, cookie: u32) {
+        log::debug!("dbus method ReleaseProfile called");
         let mut this = self.0.lock().await;
 
         if let Some(pos) = this.held_profiles.iter().position(|(id, ..)| *id == cookie) {
@@ -439,6 +446,7 @@ impl UPowerPowerProfiles {
 
     #[dbus_interface(property)]
     async fn set_active_profile(&mut self, profile: &str) {
+        log::debug!("dbus method SetActiveProfile called");
         let (func, profile): (fn(&mut Vec<ProfileError>), &'static str) = match profile {
             "power-saver" => (quiet, "Quiet"),
             "balanced" => (balanced, "Balanced"),
@@ -502,6 +510,7 @@ impl NetHadessPowerProfiles {
 
     #[dbus_interface(property)]
     async fn set_active_profile(&mut self, profile: &str) {
+        log::debug!("dbus method SetActiveProfile called");
         self.0.set_active_profile(profile).await
     }
 
