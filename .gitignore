@@ -20,3 +20,7 @@ vendor.tar.xz
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# GSD planning workspace — specs live in ~/Vault/powercurve/specs/, not the repo
+/.planning/
+/CLAUDE.md
