@@ -476,8 +476,27 @@ impl UPowerPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn active_profile_holds(&self) -> Vec<HashMap<String, zvariant::Value<'_>>> {
-        Vec::new()
+    async fn active_profile_holds(&self) -> Vec<HashMap<String, zvariant::Value<'static>>> {
+        let this = self.0.lock().await;
+        this.held_profiles
+            .iter()
+            .map(|(_, profile, reason, application_id)| {
+                HashMap::from([
+                    (
+                        String::from("Profile"),
+                        zvariant::Value::Str(zvariant::Str::from(String::from(*profile))),
+                    ),
+                    (
+                        String::from("ApplicationId"),
+                        zvariant::Value::Str(zvariant::Str::from(application_id.clone())),
+                    ),
+                    (
+                        String::from("Reason"),
+                        zvariant::Value::Str(zvariant::Str::from(reason.clone())),
+                    ),
+                ])
+            })
+            .collect()
     }
 
     #[dbus_interface(property)]
