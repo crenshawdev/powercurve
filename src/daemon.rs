@@ -377,7 +377,8 @@ impl UPowerPowerProfiles {
             }
         }
 
-        self.set_active_profile(set_profile).await;
+        // Always a valid kebab-case profile name; error here would be a programming bug.
+        let _ = self.set_active_profile(set_profile).await;
     }
 }
 
@@ -438,23 +439,28 @@ impl UPowerPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn set_active_profile(&mut self, profile: &str) {
-        let (func, profile): (fn(&mut Vec<ProfileError>), &'static str) = match profile {
+    async fn set_active_profile(&mut self, profile: &str) -> zbus::fdo::Result<()> {
+        let (func, profile_name): (fn(&mut Vec<ProfileError>), &'static str) = match profile {
             "power-saver" => (quiet, "Quiet"),
             "balanced" => (balanced, "Balanced"),
             "performance" => (performance, "Performance"),
-            _ => return,
+            _ => {
+                log::warn!("set_active_profile: rejecting unknown profile {profile:?}");
+                return Err(zbus::fdo::Error::InvalidArgs(format!(
+                    "unknown power profile: {profile}"
+                )));
+            }
         };
 
         let mut this = self.0.lock().await;
         let Some((ref connection, ..)) = this.connections else {
-            return;
+            return Err(zbus::fdo::Error::Failed(String::from("D-Bus connection not available")));
         };
 
-        if let Ok(context) = zbus::SignalContext::new(connection, DBUS_PATH) {
-            let _res =
-                this.apply_profile(&context, func, profile).await.map_err(zbus_error_from_display);
-        }
+        let context = zbus::SignalContext::new(connection, DBUS_PATH)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("signal context: {e}")))?;
+
+        this.apply_profile(&context, func, profile_name).await.map_err(zbus_error_from_display)
     }
 
     #[dbus_interface(property)]
@@ -520,7 +526,7 @@ impl NetHadessPowerProfiles {
     }
 
     #[dbus_interface(property)]
-    async fn set_active_profile(&mut self, profile: &str) {
+    async fn set_active_profile(&mut self, profile: &str) -> zbus::fdo::Result<()> {
         self.0.set_active_profile(profile).await
     }
 
