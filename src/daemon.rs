@@ -424,7 +424,7 @@ impl UPowerPowerProfiles {
             };
 
             if let Ok(context) = zbus::SignalContext::new(connection, POWER_PROFILES_DBUS_PATH) {
-                let _res = Self::profile_released(&context, cookie);
+                let _res = Self::profile_released(&context, cookie).await;
             }
         }
     }
