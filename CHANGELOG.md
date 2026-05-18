@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.1 (2026-05-18)
+
+Four bug fixes against the power-profiles-daemon drop-in surface. GNOME and KDE
+inhibitor UIs were seeing empty data where they should have been seeing live
+holds, and a malformed state-file write could leave the daemon reading a
+half-truncated profile name on boot.
+
+When a HoldProfile cookie gets released, the ProfileReleased signal now
+actually fires. The future returned by the signal emitter was being dropped
+unawaited, which made the signal a no-op on the wire. Inhibitor UIs that
+watch for release events finally get told when a hold drops.
+
+ActiveProfileHolds returns the live list of held profiles with the Profile,
+ApplicationId, and Reason keys the upstream interface defines. The old
+implementation returned an empty array. Anything querying the property for
+state restoration or display saw nothing.
+
+set_active_profile rejects unknown profile names with InvalidArgs and a WARN
+log instead of silently doing nothing. Typos and stale clients no longer
+leave the user wondering why their profile change vanished.
+
+State-file writes go through temp file plus sync_all plus atomic rename. A
+power loss or crash mid-write can no longer leave a half-truncated profile
+name that the daemon will refuse to parse on next boot.
+
 ## 0.3.0 (2026-05-06)
 
 When a temperature source disappears mid-run, the daemon now holds the last
