@@ -5,6 +5,7 @@
 /debian/files
 /target/
 /vendor/
+/.claude/
 vendor.tar
 vendor.tar.xz
 
