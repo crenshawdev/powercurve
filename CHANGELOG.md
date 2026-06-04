@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.0 (2026-06-04)
+
+Temperature reads, fan overrides, and startup config handling all get more
+correct, plus a few internal cleanups.
+
+Fan channels now track the hottest sensor on each hwmon chip instead of just
+the first. The daemon was only reading temp1, which on multi-sensor packages
+(per-core, junction, hotspot) could sit well below the actual peak. It now
+takes the max across every tempN_input, so curves respond to the temperature
+that matters.
+
+Temporary fan overrides read back exactly. Setting a channel to 50% and
+querying it returned 49%, because the percent was round-tripped through a raw
+PWM byte and back. Overrides are now stored as a percent and converted to a
+byte only when applied.
+
+The daemon validates the fan config at startup, not just on reload. A config
+with errors — a non-monotonic curve, a duty that goes quiet at the critical
+temperature — was rejected on SIGHUP but silently applied at boot. Both paths
+now agree: an invalid config is refused and the daemon runs profile-only until
+it is fixed, with the reason logged.
+
+hwmon discovery is cached instead of re-enumerated every second. The fan loop
+re-scans sysfs every 30 seconds while healthy, and immediately when a scan
+fails, so a late-appearing sensor at boot still recovers within a tick without
+the daemon walking /sys/class/hwmon at 1 Hz forever.
+
+Profile-application logging that bypassed the log framework (raw stderr writes)
+now goes through the normal logger and respects the daemon's log level. The
+Arch install validates the generated fan.toml the same way the Debian package
+already did, so install-time config problems are visible.
+
 ## 0.3.1 (2026-05-18)
 
 Four bug fixes against the power-profiles-daemon drop-in surface. GNOME and KDE

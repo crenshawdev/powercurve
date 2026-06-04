@@ -139,7 +139,8 @@ pub struct FanStatus {
     pub channel_duties: Vec<(String, Option<u8>)>,
     /// Per-channel curve points as (Celsius, percent) tuples.
     pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
-    /// Active per-channel duty overrides (percent).
+    /// Active per-channel duty overrides as a percent (0-100). Converted to a
+    /// raw PWM byte only when applied, so the value read back is exact.
     pub overrides: HashMap<String, u8>,
     /// Per-channel minimum duty floor in raw 0-255 units.
     pub min_duties: Vec<(String, Option<u8>)>,
@@ -184,9 +185,24 @@ pub struct FanDaemon {
     thermal_fallback: bool,
     thermal_cooldown: u32,
     current_profile: String,
+    /// Whether the last hwmon discovery succeeded. Cached so `step` doesn't
+    /// re-enumerate sysfs on every tick.
+    discover_ok: bool,
+    /// Steps since the last hwmon discovery, used to re-scan periodically
+    /// rather than at the full 1 Hz step rate.
+    ticks_since_discover: u32,
 }
 
 const DEFAULT_HYSTERESIS_C: f32 = 3.0;
+
+/// How many 1 Hz steps between full hwmon re-discovery scans while healthy.
+/// A failed scan retries every tick regardless, so boot-time sensor ordering
+/// and transient disappearance still recover within a second.
+const REDISCOVER_TICKS: u32 = 30;
+
+/// Highest `tempN_input` index probed per hwmon device. Matches the range
+/// `fan-detect` scans, covering per-core, junction, and hotspot sensors.
+const MAX_TEMP_INPUTS: u64 = 16;
 
 /// Per-channel duty cycle (0-255) reported back from a step. `None` means
 /// the channel is in passthrough mode and was not touched.
@@ -225,9 +241,11 @@ impl FanDaemon {
             thermal_fallback: false,
             thermal_cooldown: 30,
             current_profile: String::new(),
+            discover_ok: false,
+            ticks_since_discover: 0,
         };
 
-        daemon.apply_config(load_config());
+        daemon.apply_config(load_startup_config());
         daemon
     }
 
@@ -305,10 +323,8 @@ impl FanDaemon {
                 s.config_loaded = true;
             }
         } else {
-            log::warn!(
-                "no fan config found at {CONFIG_PATH}, fan control disabled. \
-                 run `powercurve fan-detect --generate` to create one"
-            );
+            // The caller (startup or reload) has already logged why no config
+            // is being applied; just reset to profile-only state here.
             self.channels.clear();
             self.channel_defs.clear();
             self.shared_curve = FanCurve::default();
@@ -326,10 +342,13 @@ impl FanDaemon {
         self.last_committed_duty = vec![None; count];
         self.temp_missing_warned = vec![false; count];
 
-        if !self.platform_names.is_empty()
-            && let Err(err) = self.discover()
-        {
-            log::error!("fan daemon: {err}");
+        self.discover_ok = false;
+        self.ticks_since_discover = 0;
+        if !self.platform_names.is_empty() {
+            match self.discover() {
+                Ok(()) => self.discover_ok = true,
+                Err(err) => log::error!("fan daemon: {err}"),
+            }
         }
 
         let active = self.channels.iter().filter(|ch| !ch.passthrough).count();
@@ -346,8 +365,6 @@ impl FanDaemon {
     /// Reload the fan config from disk. Validates before applying so a
     /// broken config doesn't take down the running daemon.
     pub fn reload(&mut self) {
-        use crate::config_check::{self, Severity};
-
         log::info!("reloading fan config from {CONFIG_PATH}");
 
         let config = match load_config() {
@@ -358,19 +375,8 @@ impl FanDaemon {
             }
         };
 
-        let issues = config_check::validate(&config);
-        let errors = issues.iter().filter(|i| i.severity == Severity::Error).count();
-
-        for issue in &issues {
-            let level = match issue.severity {
-                Severity::Error => "error",
-                Severity::Warning => "warning",
-            };
-            log::warn!("config {}: {}", level, issue.message);
-        }
-
-        if errors > 0 {
-            log::error!("reload aborted: config has {errors} error(s)");
+        if log_config_issues(&config) > 0 {
+            log::error!("reload aborted: config has error(s)");
             return;
         }
 
@@ -464,23 +470,13 @@ impl FanDaemon {
 
     /// Max temperature across CPU hwmon sensors, in millidegrees Celsius.
     fn get_cpu_temp(&self) -> Option<u32> {
-        self.cpus
-            .iter()
-            .filter_map(|sensor| sensor.temp(1).ok())
-            .filter_map(|temp| temp.input().ok())
-            .max()
-            .inspect(|t| log::debug!("highest cpu temp: {t}"))
+        max_temp(&self.cpus).inspect(|t| log::debug!("highest cpu temp: {t}"))
     }
 
     /// Max temperature across GPU sensors (amdgpu hwmon + NVML), in millidegrees Celsius.
     fn get_gpu_temp(&self) -> Option<u32> {
-        let mut temp_opt = self
-            .amdgpus
-            .iter()
-            .filter_map(|sensor| sensor.temp(1).ok())
-            .filter_map(|temp| temp.input().ok())
-            .max()
-            .inspect(|t| log::debug!("highest amdgpu temp: {t}"));
+        let mut temp_opt =
+            max_temp(&self.amdgpus).inspect(|t| log::debug!("highest amdgpu temp: {t}"));
 
         match self.nvidia {
             NvidiaState::Absent => {}
@@ -499,19 +495,6 @@ impl FanDaemon {
         }
 
         temp_opt
-    }
-
-    /// Read the temperature for a given source, in millidegrees Celsius.
-    fn get_temp_for(&self, source: TempSource) -> Option<u32> {
-        match source {
-            TempSource::Cpu => self.get_cpu_temp(),
-            TempSource::Gpu => self.get_gpu_temp(),
-            TempSource::All => {
-                let cpu = self.get_cpu_temp();
-                let gpu = self.get_gpu_temp();
-                cpu.into_iter().chain(gpu).max()
-            }
-        }
     }
 
     /// Set a single PWM channel's duty cycle (0-255), or restore auto mode on None.
@@ -554,7 +537,16 @@ impl FanDaemon {
             return false;
         }
 
-        if self.discover().is_err() {
+        // hwmon topology is stable while modules stay loaded, so cache the
+        // discovered handles instead of re-enumerating sysfs every tick. While
+        // healthy we only re-scan every REDISCOVER_TICKS; a failed scan retries
+        // every tick so late-appearing sensors still recover within a second.
+        self.ticks_since_discover = self.ticks_since_discover.saturating_add(1);
+        if !self.discover_ok || self.ticks_since_discover >= REDISCOVER_TICKS {
+            self.ticks_since_discover = 0;
+            self.discover_ok = self.discover().is_ok();
+        }
+        if !self.discover_ok {
             return false;
         }
 
@@ -568,7 +560,7 @@ impl FanDaemon {
             let (duties, rpms) = self.force_max_duties();
             (duties, rpms, Vec::new())
         } else {
-            self.step_channels()
+            self.step_channels(cpu_temp, gpu_temp)
         };
 
         self.write_status(cpu_temp, gpu_temp, duties, rpms, stalled, critical);
@@ -601,7 +593,11 @@ impl FanDaemon {
 
     /// Evaluate every channel under normal (non-critical) conditions and
     /// apply the resulting duties. Returns `(duties, rpms, stalled_pwms)`.
-    fn step_channels(&mut self) -> (ChannelDuties, ChannelRpms, Vec<String>) {
+    fn step_channels(
+        &mut self,
+        cpu_temp: Option<u32>,
+        gpu_temp: Option<u32>,
+    ) -> (ChannelDuties, ChannelRpms, Vec<String>) {
         let mut duties = Vec::with_capacity(self.channels.len());
         let mut rpms = Vec::with_capacity(self.channels.len());
         let mut stalled = Vec::new();
@@ -620,9 +616,9 @@ impl FanDaemon {
                 continue;
             }
 
-            let override_duty =
-                self.status.read().ok().and_then(|s| s.overrides.get(&pwm).copied());
-            if let Some(duty) = override_duty {
+            let override_pct = self.status.read().ok().and_then(|s| s.overrides.get(&pwm).copied());
+            if let Some(pct) = override_pct {
+                let duty = pct_to_duty_byte(pct);
                 self.set_channel_duty(&pwm, Some(duty));
                 let rpm = self.read_fan_rpm(&pwm);
                 duties.push((pwm.clone(), Some(duty)));
@@ -633,7 +629,7 @@ impl FanDaemon {
                 continue;
             }
 
-            let temp = self.get_temp_for(source);
+            let temp = temp_for_source(source, cpu_temp, gpu_temp);
             let curve_duty = temp.and_then(|t| duty_from_curve(&self.channels[i].curve, t));
 
             let (effective_duty, hysteresis_update) = apply_hysteresis(
@@ -758,6 +754,37 @@ impl Drop for FanDaemon {
     }
 }
 
+/// Resolve the temperature feeding a channel from already-read CPU and GPU
+/// readings, in millidegrees. Reading the two sources once per step and
+/// routing through here avoids re-reading sensors (and re-calling NVML) once
+/// per channel.
+fn temp_for_source(source: TempSource, cpu: Option<u32>, gpu: Option<u32>) -> Option<u32> {
+    match source {
+        TempSource::Cpu => cpu,
+        TempSource::Gpu => gpu,
+        TempSource::All => cpu.into_iter().chain(gpu).max(),
+    }
+}
+
+/// Maximum temperature across every `tempN_input` on the given hwmon devices,
+/// in millidegrees Celsius. Probes indices `1..=MAX_TEMP_INPUTS` and skips any
+/// that don't exist, so multi-sensor packages (per-core, junction, hotspot)
+/// are all considered rather than only `temp1`.
+fn max_temp(sensors: &[HwMon]) -> Option<u32> {
+    sensors
+        .iter()
+        .flat_map(|sensor| {
+            (1..=MAX_TEMP_INPUTS)
+                .filter_map(move |i| sensor.temp(i).ok().and_then(|t| t.input().ok()))
+        })
+        .max()
+}
+
+/// Convert a 0-100 duty percentage to a raw 0-255 PWM byte.
+fn pct_to_duty_byte(pct: u8) -> u8 {
+    ((u16::from(pct.min(100)) * 255) / 100) as u8
+}
+
 /// Convert a millidegree temperature to a 0-255 PWM duty using the given curve.
 fn duty_from_curve(curve: &FanCurve, temp_millideg: u32) -> Option<u8> {
     curve
@@ -866,6 +893,52 @@ pub(crate) fn load_config() -> Option<FanConfig> {
             None
         }
     }
+}
+
+/// Validate a parsed config, logging every issue at its severity prefix.
+/// Returns the number of error-severity issues found.
+fn log_config_issues(config: &FanConfig) -> usize {
+    use crate::config_check::{self, Severity};
+
+    let issues = config_check::validate(config);
+    let errors = issues.iter().filter(|i| i.severity == Severity::Error).count();
+
+    for issue in &issues {
+        let level = match issue.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+        };
+        log::warn!("config {}: {}", level, issue.message);
+    }
+
+    errors
+}
+
+/// Load and validate the config for initial daemon startup. Logs the precise
+/// reason fan control is disabled (missing file, parse error, or validation
+/// errors) and returns the config only when it is safe to apply. Mirrors the
+/// reload path, which already refuses to apply a config with errors.
+fn load_startup_config() -> Option<FanConfig> {
+    if !std::path::Path::new(CONFIG_PATH).exists() {
+        log::warn!(
+            "no fan config found at {CONFIG_PATH}, fan control disabled. \
+             run `powercurve fan-detect --generate` to create one"
+        );
+        return None;
+    }
+
+    // Parse errors are logged by load_config.
+    let config = load_config()?;
+
+    if log_config_issues(&config) > 0 {
+        log::error!(
+            "fan config at {CONFIG_PATH} has error(s), fan control disabled until fixed \
+             (run `powercurve config` to see them)"
+        );
+        return None;
+    }
+
+    Some(config)
 }
 
 /// Convert config curve points (Celsius / percent) to internal FanCurve.
@@ -1628,6 +1701,26 @@ mod tests {
         assert_eq!(r.final_duty, None);
         assert_eq!(r.new_stall_count, 0);
         assert!(r.bumped_to.is_none());
+    }
+
+    #[test]
+    fn pct_to_duty_byte_conversion() {
+        assert_eq!(pct_to_duty_byte(0), 0);
+        assert_eq!(pct_to_duty_byte(50), 127);
+        assert_eq!(pct_to_duty_byte(100), 255);
+        // Values above 100 are clamped before scaling.
+        assert_eq!(pct_to_duty_byte(200), 255);
+    }
+
+    #[test]
+    fn temp_source_routing() {
+        assert_eq!(temp_for_source(TempSource::Cpu, Some(50), Some(60)), Some(50));
+        assert_eq!(temp_for_source(TempSource::Gpu, Some(50), Some(60)), Some(60));
+        assert_eq!(temp_for_source(TempSource::All, Some(50), Some(60)), Some(60));
+        assert_eq!(temp_for_source(TempSource::All, None, Some(60)), Some(60));
+        assert_eq!(temp_for_source(TempSource::All, Some(50), None), Some(50));
+        assert_eq!(temp_for_source(TempSource::Cpu, None, Some(60)), None);
+        assert_eq!(temp_for_source(TempSource::All, None, None), None);
     }
 
     #[test]

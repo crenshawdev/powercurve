@@ -275,19 +275,14 @@ impl PowerService {
     #[dbus_interface(out_args("overrides"))]
     async fn get_fan_overrides(&self) -> zbus::fdo::Result<Vec<(String, u8)>> {
         let status = self.read_status()?;
-        Ok(status
-            .overrides
-            .iter()
-            .map(|(k, v)| (k.clone(), (((*v as u16) * 100) / 255) as u8))
-            .collect())
+        Ok(status.overrides.iter().map(|(k, v)| (k.clone(), *v)).collect())
     }
 
     /// Temporarily override a fan channel's duty cycle. Lasts until the
     /// next profile change or until explicitly cleared.
     async fn set_fan_override(&self, channel: &str, duty_percent: u8) -> zbus::fdo::Result<()> {
-        let duty_byte = ((duty_percent.min(100) as u16) * 255 / 100) as u8;
         let mut status = self.write_status()?;
-        status.overrides.insert(channel.to_string(), duty_byte);
+        status.overrides.insert(channel.to_string(), duty_percent.min(100));
         Ok(())
     }
 

@@ -51,7 +51,7 @@ pub fn set(profile: Profile, max_percent: u8) {
 
         if let Some((cpus, (min, max))) = num_cpus().zip(min_freq.zip(max_freq)) {
             let max = max * max_percent.min(100) as usize / 100;
-            eprintln!("setting {governor} with max {max}");
+            log::debug!("setting {governor} governor with max freq {max}");
 
             for cpu in 0..=cpus {
                 core.load(cpu);
