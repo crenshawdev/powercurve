@@ -139,7 +139,8 @@ pub struct FanStatus {
     pub channel_duties: Vec<(String, Option<u8>)>,
     /// Per-channel curve points as (Celsius, percent) tuples.
     pub channel_curves: Vec<(String, Vec<(f32, f32)>)>,
-    /// Active per-channel duty overrides (percent).
+    /// Active per-channel duty overrides as a percent (0-100). Converted to a
+    /// raw PWM byte only when applied, so the value read back is exact.
     pub overrides: HashMap<String, u8>,
     /// Per-channel minimum duty floor in raw 0-255 units.
     pub min_duties: Vec<(String, Option<u8>)>,
@@ -198,6 +199,10 @@ const DEFAULT_HYSTERESIS_C: f32 = 3.0;
 /// A failed scan retries every tick regardless, so boot-time sensor ordering
 /// and transient disappearance still recover within a second.
 const REDISCOVER_TICKS: u32 = 30;
+
+/// Highest `tempN_input` index probed per hwmon device. Matches the range
+/// `fan-detect` scans, covering per-core, junction, and hotspot sensors.
+const MAX_TEMP_INPUTS: u64 = 16;
 
 /// Per-channel duty cycle (0-255) reported back from a step. `None` means
 /// the channel is in passthrough mode and was not touched.
@@ -465,23 +470,13 @@ impl FanDaemon {
 
     /// Max temperature across CPU hwmon sensors, in millidegrees Celsius.
     fn get_cpu_temp(&self) -> Option<u32> {
-        self.cpus
-            .iter()
-            .filter_map(|sensor| sensor.temp(1).ok())
-            .filter_map(|temp| temp.input().ok())
-            .max()
-            .inspect(|t| log::debug!("highest cpu temp: {t}"))
+        max_temp(&self.cpus).inspect(|t| log::debug!("highest cpu temp: {t}"))
     }
 
     /// Max temperature across GPU sensors (amdgpu hwmon + NVML), in millidegrees Celsius.
     fn get_gpu_temp(&self) -> Option<u32> {
-        let mut temp_opt = self
-            .amdgpus
-            .iter()
-            .filter_map(|sensor| sensor.temp(1).ok())
-            .filter_map(|temp| temp.input().ok())
-            .max()
-            .inspect(|t| log::debug!("highest amdgpu temp: {t}"));
+        let mut temp_opt =
+            max_temp(&self.amdgpus).inspect(|t| log::debug!("highest amdgpu temp: {t}"));
 
         match self.nvidia {
             NvidiaState::Absent => {}
@@ -621,9 +616,9 @@ impl FanDaemon {
                 continue;
             }
 
-            let override_duty =
-                self.status.read().ok().and_then(|s| s.overrides.get(&pwm).copied());
-            if let Some(duty) = override_duty {
+            let override_pct = self.status.read().ok().and_then(|s| s.overrides.get(&pwm).copied());
+            if let Some(pct) = override_pct {
+                let duty = pct_to_duty_byte(pct);
                 self.set_channel_duty(&pwm, Some(duty));
                 let rpm = self.read_fan_rpm(&pwm);
                 duties.push((pwm.clone(), Some(duty)));
@@ -769,6 +764,25 @@ fn temp_for_source(source: TempSource, cpu: Option<u32>, gpu: Option<u32>) -> Op
         TempSource::Gpu => gpu,
         TempSource::All => cpu.into_iter().chain(gpu).max(),
     }
+}
+
+/// Maximum temperature across every `tempN_input` on the given hwmon devices,
+/// in millidegrees Celsius. Probes indices `1..=MAX_TEMP_INPUTS` and skips any
+/// that don't exist, so multi-sensor packages (per-core, junction, hotspot)
+/// are all considered rather than only `temp1`.
+fn max_temp(sensors: &[HwMon]) -> Option<u32> {
+    sensors
+        .iter()
+        .flat_map(|sensor| {
+            (1..=MAX_TEMP_INPUTS)
+                .filter_map(move |i| sensor.temp(i).ok().and_then(|t| t.input().ok()))
+        })
+        .max()
+}
+
+/// Convert a 0-100 duty percentage to a raw 0-255 PWM byte.
+fn pct_to_duty_byte(pct: u8) -> u8 {
+    ((u16::from(pct.min(100)) * 255) / 100) as u8
 }
 
 /// Convert a millidegree temperature to a 0-255 PWM duty using the given curve.
@@ -1687,6 +1701,15 @@ mod tests {
         assert_eq!(r.final_duty, None);
         assert_eq!(r.new_stall_count, 0);
         assert!(r.bumped_to.is_none());
+    }
+
+    #[test]
+    fn pct_to_duty_byte_conversion() {
+        assert_eq!(pct_to_duty_byte(0), 0);
+        assert_eq!(pct_to_duty_byte(50), 127);
+        assert_eq!(pct_to_duty_byte(100), 255);
+        // Values above 100 are clamped before scaling.
+        assert_eq!(pct_to_duty_byte(200), 255);
     }
 
     #[test]
