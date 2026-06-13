@@ -563,7 +563,10 @@ pub async fn daemon() -> anyhow::Result<()> {
                 NvidiaState::Active(handle)
             }
             None => {
-                log::warn!("nvidia GPU detected but NVML unavailable, GPU fans will run at max");
+                log::warn!(
+                    "nvidia GPU detected but NVML unavailable, \
+                     GPU-fed fan channels will run at full speed"
+                );
                 NvidiaState::Unavailable
             }
         }

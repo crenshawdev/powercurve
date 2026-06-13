@@ -493,10 +493,9 @@ impl FanDaemon {
         match self.nvidia {
             NvidiaState::Absent => {}
             NvidiaState::Unavailable => {
-                // NVIDIA hardware exists but we can't read its temp.
-                // Force GPU-sourced channels to max by reporting critical temp.
-                let safety = self.critical_gpu_temp;
-                temp_opt = Some(temp_opt.map_or(safety, |t| cmp::max(safety, t)));
+                // NVIDIA hardware exists but we can't read its temp. Handled
+                // in step_channels by forcing GPU-fed channels to full speed;
+                // reporting a fake temperature here would latch `critical`.
             }
             NvidiaState::Active(ref nvml) => {
                 if let Some(nv_temp) = nvml.max_gpu_temp() {
@@ -564,6 +563,7 @@ impl FanDaemon {
 
         let cpu_temp = self.get_cpu_temp();
         let gpu_temp = self.get_gpu_temp();
+        let gpu_unreadable = matches!(self.nvidia, NvidiaState::Unavailable);
         let critical = cpu_temp.is_some_and(|t| t >= self.critical_cpu_temp)
             || gpu_temp.is_some_and(|t| t >= self.critical_gpu_temp);
 
@@ -572,7 +572,7 @@ impl FanDaemon {
             let (duties, rpms) = self.force_max_duties();
             (duties, rpms, Vec::new())
         } else {
-            self.step_channels(cpu_temp, gpu_temp)
+            self.step_channels(cpu_temp, gpu_temp, gpu_unreadable)
         };
 
         self.write_status(cpu_temp, gpu_temp, duties, rpms, stalled, critical);
@@ -610,6 +610,7 @@ impl FanDaemon {
         &mut self,
         cpu_temp: Option<u32>,
         gpu_temp: Option<u32>,
+        gpu_unreadable: bool,
     ) -> (ChannelDuties, ChannelRpms, Vec<String>) {
         let mut duties = Vec::with_capacity(self.channels.len());
         let mut rpms = Vec::with_capacity(self.channels.len());
@@ -626,6 +627,18 @@ impl FanDaemon {
             if passthrough {
                 duties.push((pwm.clone(), None));
                 rpms.push((pwm, None));
+                continue;
+            }
+
+            if forced_max_for_source(source, gpu_unreadable) {
+                self.set_channel_duty(&pwm, Some(255));
+                self.last_committed_duty[i] = Some(255);
+                self.stall_counts[i] = 0;
+                self.temp_missing_warned[i] = false;
+                self.temp_missing_ticks[i] = 0;
+                let rpm = self.read_fan_rpm(&pwm);
+                duties.push((pwm.clone(), Some(255)));
+                rpms.push((pwm, rpm));
                 continue;
             }
 
@@ -790,6 +803,14 @@ fn temp_for_source(source: TempSource, cpu: Option<u32>, gpu: Option<u32>) -> Op
         TempSource::Gpu => gpu,
         TempSource::All => cpu.into_iter().chain(gpu).max(),
     }
+}
+
+/// True when a channel must be driven at full speed because NVIDIA hardware
+/// is present but its temperature cannot be read (NVML unavailable). Only
+/// channels actually fed by the GPU are affected; forging a fake critical
+/// reading instead would latch the whole system into the critical path.
+fn forced_max_for_source(source: TempSource, gpu_unreadable: bool) -> bool {
+    gpu_unreadable && matches!(source, TempSource::Gpu | TempSource::All)
 }
 
 /// Maximum temperature across every `tempN_input` on the given hwmon devices,
@@ -1747,6 +1768,16 @@ mod tests {
         assert_eq!(pct_to_duty_byte(100), 255);
         // Values above 100 are clamped before scaling.
         assert_eq!(pct_to_duty_byte(200), 255);
+    }
+
+    #[test]
+    fn forced_max_only_for_gpu_fed_sources() {
+        assert!(forced_max_for_source(TempSource::Gpu, true));
+        assert!(forced_max_for_source(TempSource::All, true));
+        assert!(!forced_max_for_source(TempSource::Cpu, true));
+        assert!(!forced_max_for_source(TempSource::Gpu, false));
+        assert!(!forced_max_for_source(TempSource::All, false));
+        assert!(!forced_max_for_source(TempSource::Cpu, false));
     }
 
     #[test]
