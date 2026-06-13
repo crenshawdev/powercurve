@@ -180,6 +180,9 @@ pub struct FanDaemon {
     /// Drives the escalate-to-max safety once it passes
     /// `TEMP_MISSING_ESCALATE_TICKS`.
     temp_missing_ticks: Vec<u32>,
+    /// Set while a channel's hwmon writes are failing, so the failure is
+    /// logged once per episode instead of every tick.
+    pwm_write_failed: Vec<bool>,
     platform_names: Vec<String>,
     amdgpus: Vec<HwMon>,
     platforms: Vec<HwMon>,
@@ -243,6 +246,7 @@ impl FanDaemon {
             last_committed_duty: Vec::new(),
             temp_missing_warned: Vec::new(),
             temp_missing_ticks: Vec::new(),
+            pwm_write_failed: Vec::new(),
             platform_names: Vec::new(),
             amdgpus: Vec::new(),
             platforms: Vec::new(),
@@ -353,6 +357,7 @@ impl FanDaemon {
         self.last_committed_duty = vec![None; count];
         self.temp_missing_warned = vec![false; count];
         self.temp_missing_ticks = vec![0; count];
+        self.pwm_write_failed = vec![false; count];
 
         self.discover_ok = false;
         self.ticks_since_discover = 0;
@@ -512,15 +517,36 @@ impl FanDaemon {
     ///
     /// The enable file is derived from the channel name (e.g. "pwm2" -> "pwm2_enable")
     /// so each channel controls its own hwmon output independently.
-    fn set_channel_duty(&self, pwm: &str, duty_opt: Option<u8>) {
+    ///
+    /// Returns false if any write failed; callers log health transitions so
+    /// the daemon never silently believes a duty was applied when it wasn't.
+    fn set_channel_duty(&self, pwm: &str, duty_opt: Option<u8>) -> bool {
         let enable_file = format!("{pwm}_enable");
+        let mut ok = true;
         for platform in &self.platforms {
             if let Some(duty) = duty_opt {
-                let _ = platform.write_file(&enable_file, "1");
-                let _ = platform.write_file(pwm, format!("{duty}"));
+                ok &= platform.write_file(&enable_file, "1").is_ok();
+                ok &= platform.write_file(pwm, format!("{duty}")).is_ok();
             } else {
-                let _ = platform.write_file(&enable_file, "2");
+                ok &= platform.write_file(&enable_file, "2").is_ok();
             }
+        }
+        ok
+    }
+
+    /// Apply a duty via `set_channel_duty` and log transitions between
+    /// healthy and failing hwmon writes (warn on first failure, info on
+    /// recovery) rather than once per tick.
+    fn commit_channel_duty(&mut self, i: usize, pwm: &str, duty: Option<u8>) {
+        let ok = self.set_channel_duty(pwm, duty);
+        if ok {
+            if self.pwm_write_failed[i] {
+                log::info!("{pwm}: hwmon duty writes recovered");
+                self.pwm_write_failed[i] = false;
+            }
+        } else if !self.pwm_write_failed[i] {
+            log::warn!("{pwm}: failed to write duty to hwmon, fan may not be under daemon control");
+            self.pwm_write_failed[i] = true;
         }
     }
 
@@ -592,7 +618,7 @@ impl FanDaemon {
                 rpms.push((pwm, None));
                 continue;
             }
-            self.set_channel_duty(&pwm, Some(255));
+            self.commit_channel_duty(i, &pwm, Some(255));
             self.last_committed_duty[i] = Some(255);
             self.temp_missing_warned[i] = false;
             self.temp_missing_ticks[i] = 0;
@@ -631,7 +657,7 @@ impl FanDaemon {
             }
 
             if forced_max_for_source(source, gpu_unreadable) {
-                self.set_channel_duty(&pwm, Some(255));
+                self.commit_channel_duty(i, &pwm, Some(255));
                 self.last_committed_duty[i] = Some(255);
                 self.stall_counts[i] = 0;
                 self.temp_missing_warned[i] = false;
@@ -645,7 +671,7 @@ impl FanDaemon {
             let override_pct = self.status.read().ok().and_then(|s| s.overrides.get(&pwm).copied());
             if let Some(pct) = override_pct {
                 let duty = pct_to_duty_byte(pct);
-                self.set_channel_duty(&pwm, Some(duty));
+                self.commit_channel_duty(i, &pwm, Some(duty));
                 let rpm = self.read_fan_rpm(&pwm);
                 duties.push((pwm.clone(), Some(duty)));
                 rpms.push((pwm, rpm));
@@ -725,7 +751,7 @@ impl FanDaemon {
                 base_duty
             };
 
-            self.set_channel_duty(&pwm, Some(final_duty));
+            self.commit_channel_duty(i, &pwm, Some(final_duty));
             self.last_committed_duty[i] = Some(final_duty);
             duties.push((pwm.clone(), Some(final_duty)));
             rpms.push((pwm, rpm));
@@ -788,7 +814,8 @@ impl Drop for FanDaemon {
             if channel.passthrough {
                 continue;
             }
-            self.set_channel_duty(&channel.pwm, None);
+            // Best-effort restore to auto mode; ExecStopPost is the backstop.
+            let _ = self.set_channel_duty(&channel.pwm, None);
         }
     }
 }
