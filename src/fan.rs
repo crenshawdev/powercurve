@@ -581,7 +581,24 @@ impl FanDaemon {
         self.ticks_since_discover = self.ticks_since_discover.saturating_add(1);
         if !self.discover_ok || self.ticks_since_discover >= REDISCOVER_TICKS {
             self.ticks_since_discover = 0;
-            self.discover_ok = self.discover().is_ok();
+            let was_ok = self.discover_ok;
+            match self.discover() {
+                Ok(()) => {
+                    if !was_ok {
+                        log::info!("hwmon discovery recovered, resuming fan control");
+                    }
+                    self.discover_ok = true;
+                }
+                Err(err) => {
+                    if was_ok {
+                        log::warn!(
+                            "hwmon discovery failed ({err}), fan control suspended \
+                             until devices return"
+                        );
+                    }
+                    self.discover_ok = false;
+                }
+            }
         }
         if !self.discover_ok {
             return false;
