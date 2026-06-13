@@ -142,6 +142,17 @@ fn validate_curve(
             )));
         }
 
+        if i > 0 && point.duty < points[i - 1].duty {
+            issues.push(Issue::error(format!(
+                "{} curve point {}: duty {:.1} is lower than previous {:.1}, \
+                 curves must be non-decreasing",
+                label,
+                i,
+                point.duty,
+                points[i - 1].duty,
+            )));
+        }
+
         if point.duty == 0.0 && point.temp >= critical_temp {
             issues.push(Issue::error(format!(
                 "{} curve point {}: duty is 0 at {:.1}C, at or above critical {:.1}C",
@@ -385,9 +396,10 @@ mod tests {
 
     #[test]
     fn curve_not_monotonic() {
+        // Temp decreases (error) but duty rises, isolating the temp check.
         let mut config = valid_config();
         config.curve =
-            vec![CurvePoint { temp: 50.0, duty: 50.0 }, CurvePoint { temp: 30.0, duty: 10.0 }];
+            vec![CurvePoint { temp: 50.0, duty: 10.0 }, CurvePoint { temp: 30.0, duty: 50.0 }];
         let mut issues = Vec::new();
         validate_curve(&config.curve, "shared", shared_critical(&config), &mut issues);
         assert_eq!(errors(&issues).len(), 1);
@@ -552,8 +564,8 @@ mod tests {
             "quiet".into(),
             ChannelProfileConfig {
                 curve: vec![
-                    CurvePoint { temp: 50.0, duty: 50.0 },
-                    CurvePoint { temp: 30.0, duty: 10.0 },
+                    CurvePoint { temp: 50.0, duty: 10.0 },
+                    CurvePoint { temp: 30.0, duty: 50.0 },
                 ],
             },
         );
@@ -655,8 +667,9 @@ mod tests {
 
     #[test]
     fn zero_duty_at_critical_is_error() {
+        // Flat-zero curve (non-decreasing) with a zero-duty point at critical.
         let curve =
-            vec![CurvePoint { temp: 30.0, duty: 10.0 }, CurvePoint { temp: 75.0, duty: 0.0 }];
+            vec![CurvePoint { temp: 30.0, duty: 0.0 }, CurvePoint { temp: 75.0, duty: 0.0 }];
         let mut issues = Vec::new();
         validate_curve(&curve, "shared", 75.0, &mut issues);
         let errs = errors(&issues);
@@ -666,8 +679,9 @@ mod tests {
 
     #[test]
     fn zero_duty_below_critical_is_ok() {
+        // Zero duty at 70C, all below critical 75 — allowed.
         let curve =
-            vec![CurvePoint { temp: 30.0, duty: 10.0 }, CurvePoint { temp: 70.0, duty: 0.0 }];
+            vec![CurvePoint { temp: 30.0, duty: 0.0 }, CurvePoint { temp: 70.0, duty: 0.0 }];
         let mut issues = Vec::new();
         validate_curve(&curve, "shared", 75.0, &mut issues);
         assert!(errors(&issues).is_empty());
@@ -685,7 +699,7 @@ mod tests {
             stall_threshold: None,
             passthrough: None,
             curve: Some(vec![
-                CurvePoint { temp: 30.0, duty: 10.0 },
+                CurvePoint { temp: 30.0, duty: 0.0 },
                 CurvePoint { temp: 75.0, duty: 0.0 },
             ]),
             profiles: None,
@@ -707,7 +721,7 @@ mod tests {
             stall_threshold: None,
             passthrough: None,
             curve: Some(vec![
-                CurvePoint { temp: 30.0, duty: 10.0 },
+                CurvePoint { temp: 30.0, duty: 0.0 },
                 CurvePoint { temp: 76.0, duty: 0.0 },
             ]),
             profiles: None,
@@ -718,11 +732,30 @@ mod tests {
     }
 
     #[test]
+    fn decreasing_duty_is_error() {
+        let curve =
+            vec![CurvePoint { temp: 30.0, duty: 80.0 }, CurvePoint { temp: 50.0, duty: 40.0 }];
+        let mut issues = Vec::new();
+        validate_curve(&curve, "shared", 75.0, &mut issues);
+        assert_eq!(errors(&issues).len(), 1);
+        assert!(errors(&issues)[0].contains("non-decreasing"));
+    }
+
+    #[test]
+    fn flat_duty_segment_is_ok() {
+        let curve =
+            vec![CurvePoint { temp: 30.0, duty: 40.0 }, CurvePoint { temp: 50.0, duty: 40.0 }];
+        let mut issues = Vec::new();
+        validate_curve(&curve, "shared", 75.0, &mut issues);
+        assert!(errors(&issues).is_empty());
+    }
+
+    #[test]
     fn shared_curve_zero_at_hot_uses_min_critical() {
         // Min critical is 75 (gpu). Zero duty at 76 must error via top-level validate.
         let mut config = valid_config();
         config.curve =
-            vec![CurvePoint { temp: 30.0, duty: 10.0 }, CurvePoint { temp: 76.0, duty: 0.0 }];
+            vec![CurvePoint { temp: 30.0, duty: 0.0 }, CurvePoint { temp: 76.0, duty: 0.0 }];
         let mut issues = Vec::new();
         validate_curve(&config.curve, "shared", shared_critical(&config), &mut issues);
         assert!(errors(&issues).iter().any(|e| e.contains("critical")));

@@ -1053,16 +1053,17 @@ impl FanPoint {
     }
 
     /// Interpolates the current duty with that of the given next point and temperature.
+    ///
+    /// Computed in i32 so a (config-invalid but representable) decreasing
+    /// duty segment interpolates correctly instead of wrapping u16.
     fn interpolate_duties(self, next: Self, temp: i16) -> u16 {
-        let dtemp = next.temp - self.temp;
-        let dduty = next.duty - self.duty;
+        let dtemp = i32::from(next.temp) - i32::from(self.temp);
+        let dduty = i32::from(next.duty) - i32::from(self.duty);
 
-        let slope = f32::from(dduty) / f32::from(dtemp);
+        let slope = dduty as f32 / dtemp as f32;
 
-        let temp_offset = temp - self.temp;
-        let duty_offset = (slope * f32::from(temp_offset)).round();
-
-        self.duty + (duty_offset as u16)
+        let temp_offset = i32::from(temp) - i32::from(self.temp);
+        (f32::from(self.duty) + slope * temp_offset as f32).round().clamp(0.0, 10_000.0) as u16
     }
 }
 
@@ -1150,6 +1151,16 @@ mod tests {
         assert_eq!(fan_point.get_duty_between_points(next_point, 3000), Some(3500));
         assert_eq!(fan_point.get_duty_between_points(next_point, 3250), None);
         assert_eq!(fan_point.get_duty_between_points(next_point, 3500), None);
+    }
+
+    #[test]
+    fn interpolation_handles_decreasing_duty_without_wrap() {
+        // Validation rejects decreasing curves, but the math must still be
+        // sane if one slips through (e.g. a future config path that skips
+        // validation). 80% at 20C falling to 40% at 30C -> 60% at 25C.
+        let a = FanPoint::new(20_00, 80_00);
+        let b = FanPoint::new(30_00, 40_00);
+        assert_eq!(a.get_duty_between_points(b, 25_00), Some(60_00));
     }
 
     #[test]
