@@ -5,14 +5,24 @@ use powercurve_zbus::PowerCurveProxy;
 use std::time::Duration;
 use tokio::signal::unix::{SignalKind, signal};
 
+/// How a ramp attempt ended: a spin-up floor result, or an interrupt signal.
+enum RampOutcome {
+    /// Lowest duty percent at which the tachometer read non-zero, if any.
+    Floor(Option<u8>),
+    /// SIGINT or SIGTERM arrived mid-test.
+    Interrupted,
+}
+
 /// Ramp duty on a single fan channel from `start` to 100% in `step`
 /// increments, reading RPM at each level. Reports the lowest duty
 /// where the tachometer reads non-zero, which is the channel's spin-up
 /// floor.
 ///
 /// Uses the daemon's override mechanism so other channels keep normal
-/// curve control during the test. The override is cleared on
-/// completion, error, or Ctrl-C.
+/// curve control during the test. The override is cleared on every exit
+/// path — completion, error, SIGINT, or SIGTERM. (A SIGKILL skips
+/// cleanup; the override then persists in the daemon until the next
+/// profile change.)
 pub async fn run(
     client: &mut PowerCurveProxy<'_>,
     channel: &str,
@@ -49,39 +59,73 @@ pub async fn run(
     println!("testing {channel} ({start}% to 100%, step {step}%, settle {settle_ms}ms)");
     println!();
 
-    // Install Ctrl-C handler that clears the override before exiting.
-    let client_channel = channel.to_string();
     let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
 
+    let result = ramp(client, channel, start, step, settle, &mut sigint, &mut sigterm).await;
+
+    // Always return the channel to curve control, even when the ramp
+    // errored or was interrupted. Best-effort: if the daemon is gone the
+    // override died with it.
+    let _ = client.clear_fan_override(channel).await;
+
+    match result? {
+        RampOutcome::Interrupted => {
+            println!("\ninterrupted, override cleared");
+        }
+        RampOutcome::Floor(Some(pct)) => {
+            println!();
+            println!("{channel} spins at {pct}%");
+            println!("suggested config: min_duty = {:.1}", pct as f64);
+        }
+        RampOutcome::Floor(None) => {
+            println!();
+            println!("{channel}: no spin detected up to 100%");
+            println!("check that the fan is connected and the tachometer works");
+        }
+    }
+
+    Ok(())
+}
+
+/// Drive the override ramp. The caller owns override cleanup so every
+/// return path here — success, error, or signal — gets cleaned up the
+/// same way.
+async fn ramp(
+    client: &PowerCurveProxy<'_>,
+    channel: &str,
+    start: u8,
+    step: u8,
+    settle: Duration,
+    sigint: &mut tokio::signal::unix::Signal,
+    sigterm: &mut tokio::signal::unix::Signal,
+) -> anyhow::Result<RampOutcome> {
     // Stop the fan first so we start from a known state.
     client
         .set_fan_override(channel, 0)
         .await
         .map_err(|e| anyhow::anyhow!("failed to set override: {e}"))?;
-    tokio::time::sleep(settle).await;
+    tokio::select! {
+        _ = tokio::time::sleep(settle) => {}
+        _ = sigint.recv() => return Ok(RampOutcome::Interrupted),
+        _ = sigterm.recv() => return Ok(RampOutcome::Interrupted),
+    }
 
     let mut floor: Option<u8> = None;
     let mut pct = start;
 
-    loop {
-        if pct > 100 {
-            break;
-        }
-
+    while pct <= 100 {
         client
             .set_fan_override(channel, pct)
             .await
             .map_err(|e| anyhow::anyhow!("failed to set override: {e}"))?;
 
         // Wait for the duty to be applied and the motor to respond,
-        // but also watch for Ctrl-C so we can clean up.
+        // but also watch for signals so the caller can clean up.
         tokio::select! {
             _ = tokio::time::sleep(settle) => {}
-            _ = sigint.recv() => {
-                println!("\ninterrupted, clearing override");
-                let _ = client.clear_fan_override(&client_channel).await;
-                return Ok(());
-            }
+            _ = sigint.recv() => return Ok(RampOutcome::Interrupted),
+            _ = sigterm.recv() => return Ok(RampOutcome::Interrupted),
         }
 
         let rpm = read_channel_rpm(client, channel).await;
@@ -99,22 +143,7 @@ pub async fn run(
         pct = pct.saturating_add(step);
     }
 
-    // Clear override and return to curve control.
-    let _ = client.clear_fan_override(channel).await;
-
-    println!();
-    match floor {
-        Some(pct) => {
-            println!("{channel} spins at {pct}%");
-            println!("suggested config: min_duty = {:.1}", pct as f64);
-        }
-        None => {
-            println!("{channel}: no spin detected up to 100%");
-            println!("check that the fan is connected and the tachometer works");
-        }
-    }
-
-    Ok(())
+    Ok(RampOutcome::Floor(floor))
 }
 
 /// Read RPM for a specific channel from the daemon's current readings.
