@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+A pass over the fan-control failure paths, all biased toward keeping fans
+spinning when something goes wrong rather than letting them coast.
+
+A dead temperature source no longer pins fans low. If a sensor stops
+reporting, a channel held its last duty — which could be the floor, or even
+zero — indefinitely, and a channel with a min_duty floor dropped straight to
+that floor with no warning. Channels now hold their last duty but never below
+the spin-up fallback or the configured floor, log the missing source once, and
+escalate to full speed after 30 seconds without a reading, since critical-temp
+detection is blind while the sensor is gone.
+
+NVML being unavailable no longer cripples the whole system. When NVIDIA
+hardware was present but its temperature could not be read, the daemon forged a
+critical reading, which drove *every* fan to max, logged once a second, and —
+with thermal fallback on — stepped the profile down to Quiet and never
+recovered. Only the GPU-fed channels are now forced to full speed; CPU channels
+keep following their curves and the profile is left alone.
+
+Fan curves with decreasing duty are now rejected at validation, and curve
+interpolation can no longer wrap around if such a curve reaches the evaluator —
+previously a duty that fell as temperature rose produced a garbage value
+(release) or panicked the daemon (debug).
+
+fan-test clears its override on every exit path. An error mid-test or a SIGTERM
+used to leave the channel pinned at a low test duty in the daemon until the
+next profile change; only Ctrl-C cleaned up.
+
+Failed hwmon writes and hwmon discovery loss are no longer silent. A PWM write
+the EC rejects, and a mid-run discovery failure that suspends fan control, are
+now logged once per episode (with a matching recovery line) instead of leaving
+the daemon quietly believing it is in control. A persistently stalled fan also
+logs one warning per stall episode instead of one every second.
+
 ## 0.4.0 (2026-06-04)
 
 Temperature reads, fan overrides, and startup config handling all get more
