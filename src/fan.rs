@@ -176,6 +176,10 @@ pub struct FanDaemon {
     /// Set when the last tick logged a missing-temp warning for this channel.
     /// Cleared when temp returns, so the warn fires once per episode.
     temp_missing_warned: Vec<bool>,
+    /// Consecutive ticks this channel's temp source has been missing.
+    /// Drives the escalate-to-max safety once it passes
+    /// `TEMP_MISSING_ESCALATE_TICKS`.
+    temp_missing_ticks: Vec<u32>,
     platform_names: Vec<String>,
     amdgpus: Vec<HwMon>,
     platforms: Vec<HwMon>,
@@ -203,6 +207,12 @@ const REDISCOVER_TICKS: u32 = 30;
 /// Highest `tempN_input` index probed per hwmon device. Matches the range
 /// `fan-detect` scans, covering per-core, junction, and hotspot sensors.
 const MAX_TEMP_INPUTS: u64 = 16;
+
+/// Consecutive 1 Hz ticks a channel's temp source may be missing before the
+/// channel is driven to full speed. While the source is gone, critical-temp
+/// detection is blind for it, so a sensor that stays dead for this long is
+/// treated as an emergency rather than a transient.
+const TEMP_MISSING_ESCALATE_TICKS: u32 = 30;
 
 /// Per-channel duty cycle (0-255) reported back from a step. `None` means
 /// the channel is in passthrough mode and was not touched.
@@ -232,6 +242,7 @@ impl FanDaemon {
             stall_counts: Vec::new(),
             last_committed_duty: Vec::new(),
             temp_missing_warned: Vec::new(),
+            temp_missing_ticks: Vec::new(),
             platform_names: Vec::new(),
             amdgpus: Vec::new(),
             platforms: Vec::new(),
@@ -341,6 +352,7 @@ impl FanDaemon {
         self.stall_counts = vec![0; count];
         self.last_committed_duty = vec![None; count];
         self.temp_missing_warned = vec![false; count];
+        self.temp_missing_ticks = vec![0; count];
 
         self.discover_ok = false;
         self.ticks_since_discover = 0;
@@ -583,6 +595,7 @@ impl FanDaemon {
             self.set_channel_duty(&pwm, Some(255));
             self.last_committed_duty[i] = Some(255);
             self.temp_missing_warned[i] = false;
+            self.temp_missing_ticks[i] = 0;
             let rpm = self.read_fan_rpm(&pwm);
             duties.push((pwm.clone(), Some(255)));
             rpms.push((pwm, rpm));
@@ -626,31 +639,59 @@ impl FanDaemon {
                 self.stall_counts[i] = 0;
                 self.last_committed_duty[i] = Some(duty);
                 self.temp_missing_warned[i] = false;
+                self.temp_missing_ticks[i] = 0;
                 continue;
             }
 
             let temp = temp_for_source(source, cpu_temp, gpu_temp);
-            let curve_duty = temp.and_then(|t| duty_from_curve(&self.channels[i].curve, t));
 
-            let (effective_duty, hysteresis_update) = apply_hysteresis(
-                curve_duty,
-                temp,
-                self.last_duties[i],
-                self.last_temps[i],
-                self.hysteresis,
-            );
-            if let Some((new_last_duty, new_last_temp)) = hysteresis_update {
-                self.last_duties[i] = new_last_duty;
-                self.last_temps[i] = new_last_temp;
-            }
+            let base_duty: u8 = if temp.is_some() {
+                self.temp_missing_ticks[i] = 0;
+                self.temp_missing_warned[i] = false;
 
-            let floored_duty = apply_min_duty_floor(effective_duty, min_duty);
+                let curve_duty = temp.and_then(|t| duty_from_curve(&self.channels[i].curve, t));
+                let (effective_duty, hysteresis_update) = apply_hysteresis(
+                    curve_duty,
+                    temp,
+                    self.last_duties[i],
+                    self.last_temps[i],
+                    self.hysteresis,
+                );
+                if let Some((new_last_duty, new_last_temp)) = hysteresis_update {
+                    self.last_duties[i] = new_last_duty;
+                    self.last_temps[i] = new_last_temp;
+                }
+
+                // Validated configs always yield a duty here (curves are
+                // non-empty); fall back defensively rather than skip the write.
+                apply_min_duty_floor(effective_duty, min_duty).unwrap_or(Self::STALL_FALLBACK_DUTY)
+            } else {
+                self.temp_missing_ticks[i] = self.temp_missing_ticks[i].saturating_add(1);
+                let escalate = self.temp_missing_ticks[i] >= TEMP_MISSING_ESCALATE_TICKS;
+                let held = resolve_missing_temp_duty(
+                    self.last_committed_duty[i],
+                    min_duty,
+                    Self::STALL_FALLBACK_DUTY,
+                    escalate,
+                );
+                if !self.temp_missing_warned[i] {
+                    log::warn!("{pwm}: temp source {source:?} unavailable, holding duty at {held}");
+                    self.temp_missing_warned[i] = true;
+                }
+                if self.temp_missing_ticks[i] == TEMP_MISSING_ESCALATE_TICKS {
+                    log::warn!(
+                        "{pwm}: temp source {source:?} still missing after \
+                         {TEMP_MISSING_ESCALATE_TICKS}s, driving fan to full speed"
+                    );
+                }
+                held
+            };
 
             let rpm = if stall_detect { self.read_fan_rpm(&pwm) } else { None };
 
-            let computed_duty = if stall_detect {
+            let final_duty = if stall_detect {
                 let result = evaluate_stall(
-                    floored_duty,
+                    Some(base_duty),
                     rpm,
                     self.stall_counts[i],
                     stall_threshold,
@@ -659,36 +700,21 @@ impl FanDaemon {
                 );
                 self.stall_counts[i] = result.new_stall_count;
                 if let Some(bump) = result.bumped_to {
-                    log::warn!("{pwm}: fan stalled (0 RPM with duty > 0), bumping to {bump}");
+                    // Log once per stall episode; the count keeps rising
+                    // while stalled, so only the crossing tick logs.
+                    if result.new_stall_count == stall_threshold {
+                        log::warn!("{pwm}: fan stalled (0 RPM with duty > 0), bumping to {bump}");
+                    }
                     stalled.push(pwm.clone());
                 }
-                result.final_duty
+                result.final_duty.unwrap_or(base_duty)
             } else {
-                floored_duty
+                base_duty
             };
 
-            let temp_missing = computed_duty.is_none();
-            let final_duty = resolve_safe_duty(
-                computed_duty,
-                self.last_committed_duty[i],
-                Self::STALL_FALLBACK_DUTY,
-            );
-            if temp_missing {
-                if !self.temp_missing_warned[i]
-                    && let Some(held) = final_duty
-                {
-                    log::warn!("{pwm}: temp source {source:?} unavailable, holding duty at {held}");
-                    self.temp_missing_warned[i] = true;
-                }
-            } else {
-                self.temp_missing_warned[i] = false;
-            }
-
-            self.set_channel_duty(&pwm, final_duty);
-            if let Some(d) = final_duty {
-                self.last_committed_duty[i] = Some(d);
-            }
-            duties.push((pwm.clone(), final_duty));
+            self.set_channel_duty(&pwm, Some(final_duty));
+            self.last_committed_duty[i] = Some(final_duty);
+            duties.push((pwm.clone(), Some(final_duty)));
             rpms.push((pwm, rpm));
         }
 
@@ -831,12 +857,23 @@ fn apply_min_duty_floor(duty: Option<u8>, floor: Option<u8>) -> Option<u8> {
     }
 }
 
-/// Resolve a safe duty when the curve pipeline produced `None` because the
-/// temp source was unavailable. Holding the last committed duty is strictly
-/// safer than letting `set_channel_duty` write `pwm_enable=2` and hand the
-/// channel back to the EC. With no prior commit, fall to `fallback`.
-fn resolve_safe_duty(computed: Option<u8>, last_committed: Option<u8>, fallback: u8) -> Option<u8> {
-    computed.or_else(|| Some(last_committed.unwrap_or(fallback)))
+/// Resolve the duty for a channel whose temp source is unavailable.
+///
+/// Holds the last committed duty, but never below the spin-up `fallback`
+/// or the configured `min_duty` floor — a held duty of 0 while load rises
+/// would cook the hardware. When `escalate` is set (the source has been
+/// missing for `TEMP_MISSING_ESCALATE_TICKS`), drive the fan to full speed
+/// because critical-temp detection is blind without a reading.
+fn resolve_missing_temp_duty(
+    last_committed: Option<u8>,
+    min_duty: Option<u8>,
+    fallback: u8,
+    escalate: bool,
+) -> u8 {
+    if escalate {
+        return 255;
+    }
+    last_committed.unwrap_or(0).max(fallback).max(min_duty.unwrap_or(0))
 }
 
 /// Outcome of stall detection for a single channel.
@@ -1724,22 +1761,34 @@ mod tests {
     }
 
     #[test]
-    fn safe_duty_passes_through_some() {
-        assert_eq!(resolve_safe_duty(Some(80), Some(50), 38), Some(80));
-        assert_eq!(resolve_safe_duty(Some(80), None, 38), Some(80));
-        assert_eq!(resolve_safe_duty(Some(0), Some(50), 38), Some(0));
+    fn missing_temp_duty_holds_last_committed() {
+        assert_eq!(resolve_missing_temp_duty(Some(200), None, 38, false), 200);
     }
 
     #[test]
-    fn safe_duty_holds_last_when_none_with_history() {
-        assert_eq!(resolve_safe_duty(None, Some(80), 38), Some(80));
-        assert_eq!(resolve_safe_duty(None, Some(255), 38), Some(255));
-        assert_eq!(resolve_safe_duty(None, Some(0), 38), Some(0));
+    fn missing_temp_duty_never_below_fallback() {
+        // A held duty of 0 must be raised to the spin-up fallback.
+        assert_eq!(resolve_missing_temp_duty(Some(0), None, 38, false), 38);
+        assert_eq!(resolve_missing_temp_duty(None, None, 38, false), 38);
     }
 
     #[test]
-    fn safe_duty_uses_fallback_when_none_no_history() {
-        assert_eq!(resolve_safe_duty(None, None, 38), Some(38));
-        assert_eq!(resolve_safe_duty(None, None, 100), Some(100));
+    fn missing_temp_duty_respects_min_floor() {
+        assert_eq!(resolve_missing_temp_duty(Some(10), Some(100), 38, false), 100);
+    }
+
+    #[test]
+    fn missing_temp_duty_escalates_to_max() {
+        assert_eq!(resolve_missing_temp_duty(Some(10), Some(100), 38, true), 255);
+        assert_eq!(resolve_missing_temp_duty(None, None, 38, true), 255);
+    }
+
+    #[test]
+    fn stall_count_continues_past_threshold() {
+        // The count keeps rising while stalled so the caller can log only
+        // on the crossing tick (count == threshold) and not every second.
+        let r = evaluate_stall(Some(80), Some(0), 3, 3, Some(150), 38);
+        assert_eq!(r.new_stall_count, 4);
+        assert_eq!(r.bumped_to, Some(150));
     }
 }
