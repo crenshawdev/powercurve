@@ -73,7 +73,7 @@ coverage:
   before_script:
     - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
     - rustup component add llvm-tools-preview
-    - cargo install cargo-llvm-cov --locked
+    - test -x "$CARGO_HOME/bin/cargo-llvm-cov" || cargo install cargo-llvm-cov --locked
   script:
     # Collect coverage, emit a Cobertura report for GitLab's MR widget, then
     # print the text summary so the `coverage` regex can scrape the total.
