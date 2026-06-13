@@ -13,6 +13,7 @@ cache:
   paths:
     - .cargo/registry/cache
     - .cargo/registry/index
+    - .cargo/bin
     - target
 
 # -- check stage --------------------------------------------------------
@@ -62,6 +63,31 @@ test:
     - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
   script:
     - cargo test --workspace
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+coverage:
+  stage: test
+  image: rust:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq libdbus-1-dev pkg-config
+    - rustup component add llvm-tools-preview
+    - cargo install cargo-llvm-cov --locked
+  script:
+    # Collect coverage, emit a Cobertura report for GitLab's MR widget, then
+    # print the text summary so the `coverage` regex can scrape the total.
+    - mkdir -p target/llvm-cov-target
+    - cargo llvm-cov --no-report --workspace
+    - cargo llvm-cov report --cobertura --output-path target/llvm-cov-target/cobertura.xml
+    - cargo llvm-cov report --summary-only
+  coverage: '/TOTAL\s+(\d+\s+)+(\d+\.\d+\%)/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: target/llvm-cov-target/cobertura.xml
+    expire_in: 1 week
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
