@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Release validation, tests, Debian and Arch packaging, checksums, and GitHub
+release publication now run on GitHub Actions. Release builds pin the exact tag
+commit, and the project and package metadata now use GitHub as the canonical
+source.
+
 A pass over the fan-control failure paths, all biased toward keeping fans
 spinning when something goes wrong rather than letting them coast.
 

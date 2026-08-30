@@ -48,7 +48,7 @@ sudo pacman -U /var/cache/pacman/pkg/powercurve-git-<old-version>-x86_64.pkg.tar
 ```
 
 On Debian/Ubuntu/Pop!_OS, download the older .deb from the
-[releases page](https://gitlab.com/vintagetechie/powercurve/-/releases)
+[GitHub releases page](https://github.com/crenshawdev/powercurve/releases)
 and install it:
 
 ```
