@@ -1,5 +1,7 @@
 # powercurve
 
+[![CI](https://github.com/crenshawdev/powercurve/actions/workflows/ci.yml/badge.svg)](https://github.com/crenshawdev/powercurve/actions/workflows/ci.yml)
+
 A Linux power management daemon with built-in fan curves.
 
 ## What it does
@@ -29,7 +31,7 @@ yay -S powercurve-git
 ### Debian / Ubuntu / Pop!_OS
 
 Download the latest `.deb` from the
-[releases page](https://gitlab.com/vintagetechie/powercurve/-/releases):
+[GitHub releases page](https://github.com/crenshawdev/powercurve/releases/latest):
 
 ```
 sudo apt install ./powercurve_*.deb
