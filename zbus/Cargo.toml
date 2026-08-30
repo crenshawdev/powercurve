@@ -8,4 +8,4 @@ license = "GPL-3.0-only"
 workspace = true
 
 [dependencies]
-zbus = "3"
+zbus = "5"
