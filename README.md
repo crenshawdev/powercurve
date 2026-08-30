@@ -1,6 +1,10 @@
 # powercurve
 
 [![CI](https://github.com/crenshawdev/powercurve/actions/workflows/ci.yml/badge.svg)](https://github.com/crenshawdev/powercurve/actions/workflows/ci.yml)
+[![Release](https://github.com/crenshawdev/powercurve/actions/workflows/release.yml/badge.svg)](https://github.com/crenshawdev/powercurve/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/crenshawdev/powercurve?label=release)](https://github.com/crenshawdev/powercurve/releases/latest)
+[![AUR version](https://img.shields.io/aur/version/powercurve-git)](https://aur.archlinux.org/packages/powercurve-git)
+[![License: GPL-3.0](https://img.shields.io/github/license/crenshawdev/powercurve)](LICENSE)
 
 A Linux power management daemon with built-in fan curves.
 
