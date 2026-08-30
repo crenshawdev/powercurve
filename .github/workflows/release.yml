@@ -53,6 +53,12 @@ jobs:
 
           git show-ref --verify --quiet "refs/tags/$TAG"
           tag_sha="$(git rev-list --max-count=1 "$TAG")"
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$tag_sha" origin/main; then
+            echo "release tag must point to a commit on origin/main: $TAG" >&2
+            exit 1
+          fi
+
           version="$(cargo metadata --locked --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "powercurve") | .version')"
           test "v$version" = "$TAG"
